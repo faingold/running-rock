@@ -73,100 +73,21 @@ Main:
 	; code in that ISR will attempt to control the robot.
 	; If you want to take manual control of the robot,
 	; execute CLI &B0010 to disable the timer interrupt.
+	
+	LOADI  90
+	STORE  DTheta      ; use API to get robot to face 90 degrees
+TurnLoop:
+	IN     Theta
+	ADDI   -90
+	CALL   Abs         ; get abs(currentAngle - 90)
+	ADDI   -3
+	JPOS   TurnLoop    ; if angle error > 3, keep checking
+	; at this point, robot should be within 3 degrees of 90
+	LOAD   FMid
+	STORE  DVel        ; use API to move forward
 
-	
-	; TODO: Program Sonar interrupts to kill the robot when its close to the wall
-	LOADI 	&b00101100
-	OUT 	SONAREN     	;ENABLE SONAR
-	LOADI 	&b00000000
-	OUT 	SONARINT		;DISABLE INTERRUPTS 
-	
-	LOADI	400
-	OUT		SONALARM		;Set threshold distance
-	
-	LOAD	Zero
-	STORE	Temp			; Temp is the target angle. Set it to 0
-	
-	LOADI	-600
-	STORE	RThresh
-	LOADI	-700
-	STORE	LThresh			; Set Thresholds
-	
-	LOADI	-5	
-	STORE	AdjTheta		; Set Adjustment Angle
-	
-ActionLoop:
-	LOAD	Temp			; Load target angle
-	STORE 	DTheta			; look staight ahead
-	LOAD   	FMid			; Load medium forward speed value
-	STORE  	DVel         	; use API to move forward
-	
-; 	IN 		DIST2
-; 	OUT		LCD
-; 	IN 		DIST3
-; 	OUT 	SSEG2
-	;IN		DIST0			
-	;OUT	SSEG1			; Show sonar data 
-	
-	IN		XPOS
-	OUT		LCD				; Show odometry x position
-	
-	
-	IN		SONALARM		; Read sonar alarm data
-	AND		Mask23
-	;OUT	SSEG1
-	JPOS	TurnAtCorner	; Execute turn routine if wall ahead
-	
-	IN 		DIST5
-	SUB		RThresh
-	;ADDI	&hFF38
-	JNEG	CorrectLeft		; Check if side wall is too close
-	
-	IN 		DIST5
-	SUB		LThresh
-	;ADDI	&hFE70
-	JPOS	CorrectRight	; Check if side wall is too far
-	
-	
-Loop:	
-	JUMP 	ActionLoop		
-	
-	
-CorrectRight:				; Set Target Angle to Adjustment Angle
-	LOAD	AdjTheta
-	OUT		SSEG1
-	STORE	TEMP
-	JUMP	Loop
-
-CorrectLeft:				; Set Target Angle to Adjustment Angle
-	LOAD	AdjTheta
-	CALL	Abs
-	OUT		SSEG1
-	STORE	TEMP
-	JUMP	Loop
-	
-TurnAtCorner:
-	LOADI	90
-	STORE	DTheta
-	CALL	Wait1
-	CALL	Wait1			; Turn and wait for 2 sec. Hope it turned
-	
-	OUT    	RESETPOS		; Reset odometry
-	
-	LOADI	-200
-	STORE	RThresh
-	LOADI	-300
-	STORE	LThresh			; Update Thresholds
-	
-	LOADI	-10	
-	STORE	AdjTheta		; Update Adjustment Angle
-	
-	JUMP	Loop			
-	
-
-	
-	
-	
+InfLoop: 
+	JUMP   InfLoop
 	; note that the movement API will still be running during this
 	; infinite loop, because it uses the timer interrupt, so the
 	; robot will continue to attempt to match DTheta and DVel
@@ -741,9 +662,6 @@ I2CError:
 ;* Variables
 ;***************************************************************
 Temp:     DW 0 ; "Temp" is not a great name, but can be useful
-RThresh:  DW 0
-LThresh:  DW 0
-AdjTheta: DW 0		
 
 ;***************************************************************
 ;* Constants
@@ -762,7 +680,6 @@ Eight:    DW 8
 Nine:     DW 9
 Ten:      DW 10
 
-
 ; Some bit masks.
 ; Masks of multiple bits can be constructed by ORing these
 ; 1-bit masks together.
@@ -776,7 +693,6 @@ Mask6:    DW &B01000000
 Mask7:    DW &B10000000
 LowByte:  DW &HFF      ; binary 00000000 1111111
 LowNibl:  DW &HF       ; 0000 0000 0000 1111
-Mask23:	  DW &B00001100
 
 ; some useful movement values
 OneMeter: DW 961       ; ~1m in 1.04mm units
