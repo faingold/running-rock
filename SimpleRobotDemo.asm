@@ -7,306 +7,407 @@
 ; This code uses the timer interrupt for the movement control code.
 ; The ISR jump table is located in mem 0-4.  See manual for details.
 ORG 0
-    JUMP   Init        ; Reset vector
-    RETI               ; Sonar interrupt (unused)
-    JUMP   CTimer_ISR  ; Timer interrupt
-    RETI               ; UART interrupt (unused)
-    RETI               ; Motor stall interrupt (unused)
+	JUMP   Init        ; Reset vector
+	RETI               ; Sonar interrupt (unused)
+	JUMP   CTimer_ISR  ; Timer interrupt
+	RETI               ; UART interrupt (unused)
+	RETI               ; Motor stall interrupt (unused)
 
 ;***************************************************************
 ;* Initialization
 ;***************************************************************
 Init:
-    ; Always a good idea to make sure the robot
-    ; stops in the event of a reset.
-    LOAD   Zero
-    OUT    LVELCMD     ; Stop motors
-    OUT    RVELCMD
-    STORE  DVel        ; Reset API variables
-    STORE  DTheta
-    OUT    SONAREN     ; Disable sonar (optional)
-    OUT    BEEP        ; Stop any beeping (optional)
+	; Always a good idea to make sure the robot
+	; stops in the event of a reset.
+	LOAD   Zero
+	OUT    LVELCMD     ; Stop motors
+	OUT    RVELCMD
+	STORE  DVel        ; Reset API variables
+	STORE  DTheta
+	OUT    SONAREN     ; Disable sonar (optional)
+	OUT    BEEP        ; Stop any beeping (optional)
 
-    CALL   SetupI2C    ; Configure the I2C to read the battery voltage
-    CALL   BattCheck   ; Get battery voltage (and end if too low).
-    OUT    LCD         ; Display battery voltage (hex, tenths of volts)
+	CALL   SetupI2C    ; Configure the I2C to read the battery voltage
+	CALL   BattCheck   ; Get battery voltage (and end if too low).
+	OUT    LCD         ; Display battery voltage (hex, tenths of volts)
 
 WaitForSafety:
-    ; This loop will wait for the user to toggle SW17.  Note that
-    ; SCOMP does not have direct access to SW17; it only has access
-    ; to the SAFETY signal contained in XIO.
-    IN     XIO         ; XIO contains SAFETY signal
-    AND    Mask4       ; SAFETY signal is bit 4
-    JPOS   WaitForUser ; If ready, jump to wait for PB3
-    IN     TIMER       ; We'll use the timer value to
-    AND    Mask1       ;  blink LED17 as a reminder to toggle SW17
-    SHIFT  8           ; Shift over to LED17
-    OUT    XLEDS       ; LED17 blinks at 2.5Hz (10Hz/4)
-    JUMP   WaitForSafety
+	; This loop will wait for the user to toggle SW17.  Note that
+	; SCOMP does not have direct access to SW17; it only has access
+	; to the SAFETY signal contained in XIO.
+	IN     XIO         ; XIO contains SAFETY signal
+	AND    Mask4       ; SAFETY signal is bit 4
+	JPOS   WaitForUser ; If ready, jump to wait for PB3
+	IN     TIMER       ; We'll use the timer value to
+	AND    Mask1       ;  blink LED17 as a reminder to toggle SW17
+	SHIFT  8           ; Shift over to LED17
+	OUT    XLEDS       ; LED17 blinks at 2.5Hz (10Hz/4)
+	JUMP   WaitForSafety
 
 WaitForUser:
-    ; This loop will wait for the user to press PB3, to ensure that
-    ; they have a chance to prepare for any movement in the main code.
-    IN     TIMER       ; We'll blink the LEDs above PB3
-    AND    Mask1
-    SHIFT  5           ; Both LEDG6 and LEDG7
-    STORE  Temp        ; (overkill, but looks nice)
-    SHIFT  1
-    OR     Temp
-    OUT    XLEDS
-    IN     XIO         ; XIO contains KEYs
-    AND    Mask2       ; KEY3 mask (KEY0 is reset and can't be read)
-    JPOS   WaitForUser ; not ready (KEYs are active-low, hence JPOS)
-    LOAD   Zero
-    OUT    XLEDS       ; clear LEDs once ready to continue
+	; This loop will wait for the user to press PB3, to ensure that
+	; they have a chance to prepare for any movement in the main code.
+	IN     TIMER       ; We'll blink the LEDs above PB3
+	AND    Mask1
+	SHIFT  5           ; Both LEDG6 and LEDG7
+	STORE  Temp        ; (overkill, but looks nice)
+	SHIFT  1
+	OR     Temp
+	OUT    XLEDS
+	IN     XIO         ; XIO contains KEYs
+	AND    Mask2       ; KEY3 mask (KEY0 is reset and can't be read)
+	JPOS   WaitForUser ; not ready (KEYs are active-low, hence JPOS)
+	LOAD   Zero
+	OUT    XLEDS       ; clear LEDs once ready to continue
 
 ;***************************************************************
 ;* Main code
 ;***************************************************************
 Main:
-    OUT    RESETPOS    ; reset the odometry to 0,0,0
-    ; configure timer interrupt for the movement control code
-    LOADI  10          ; period = (10 ms * 10) = 0.1s, or 10Hz.
-    OUT    CTIMER      ; turn on timer peripheral
-    SEI    &B0010      ; enable interrupts from source 2 (timer)
-    ; at this point, timer interrupts will be firing at 10Hz, and
-    ; code in that ISR will attempt to control the robot.
-    ; If you want to take manual control of the robot,
-    ; execute CLI &B0010 to disable the timer interrupt.
+	OUT    RESETPOS    ; reset the odometry to 0,0,0
+	; configure timer interrupt for the movement control code
+	LOADI  10          ; period = (10 ms * 10) = 0.1s, or 10Hz.
+	OUT    CTIMER      ; turn on timer peripheral
+	SEI    &B0010      ; enable interrupts from source 2 (timer)
+	; at this point, timer interrupts will be firing at 10Hz, and
+	; code in that ISR will attempt to control the robot.
+	; If you want to take manual control of the robot,
+	; execute CLI &B0010 to disable the timer interrupt.
 
 ; Initial Setup
-    LOADI   &b00101101
-    OUT     SONAREN         ;ENABLE SONAR
-    LOADI   &b00000000
-    OUT     SONARINT        ;DISABLE INTERRUPTS
+	LOADI 	&b00101101
+	OUT 	SONAREN     	; Enable Sonars
+	LOADI 	&b00000000
+	OUT 	SONARINT		; Disable Interrupts
 
-    LOADI   500
-    OUT     SONALARM        ;Set threshold distance
+	LOADI	600
+	OUT		SONALARM		; Set threshold distance of forward sensors for wall turn 
 
-    LOAD    Zero
-    STORE   Temp            ; Temp is the target angle. Set it to 0
+	LOAD	Zero
+	STORE	Temp			; Temp is the target angle. Set it to 0
 
-    LOAD    BlueF
-    STORE   Leg             ; Set leg to blue forward
+	LOAD	BlueF
+	STORE	Leg				; Set leg to blue forward
 
-    LOADI   -600
-    STORE   RThresh
-    LOADI   -700
-    STORE   LThresh         ; Set Thresholds
+	LOADI	650
+	STORE	Thresh			; Set wall distance threshold
 
+	CALL	Wait1			; Wait for everything to initialize		
 
-    ; Not changing adj angle for now
-    ;LOADI  -5
-    ;STORE  AdjTheta        ; Set Adjustment Angle
-
+	
+;This loop keeps repeating as the robot runs
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ActionLoop:
-    LOAD    Temp            ; Load target angle
-    STORE   DTheta          ; look staight ahead
-    LOAD    FMid            ; Load medium forward speed value
-    STORE   DVel            ; use API to move forward
+	LOAD	Temp			; Load target angle
+	STORE 	DTheta			; Update target direction
+	LOAD   	FMid			; Load medium forward speed value
+	STORE  	DVel         	; Use API to move forward
 
-    ;IN     XPOS
-;   IN      DIST5
-;   OUT     LCD             ; Show odometry x position
-    LOAD    Leg
-    OUT     LCD
+	LOAD	Leg
+	OUT		LCD				; Display current leg for debug
 
-    IN      SONALARM        ; Read sonar alarm data
-    AND     Mask23
-    JPOS    TurnAtCorner    ; Execute turn routine if wall ahead
-
-    LOAD    Leg
-    SUB     BlueF
-    JZERO   SonarR
-    ADD     BlueF
-    SUB     WhiteF
-    JZERO   SonarR
-    JUMP    SonarL          ; Determine which sonar to read based on current leg
-
-SonarR:
-    IN      DIST5
-    JUMP    Sonared
-SonarL:
-    IN      DIST0
-    JUMP    Sonared         ; Read appropriate sonar
-
-Sonared:
-    ADD     RThresh
-    ;ADDI   &hFF38
-    JNEG    CorrectLeft     ; Check if side wall is too close
-
-    IN      DIST5
-    ADD     LThresh
-    ;ADDI   &hFE70
-    JPOS    CorrectRight    ; Check if side wall is too far
-
+	IN		SONALARM		; Read sonar alarm data
+	AND		Mask23			; Mask to only get values of 2 forward sensors
+	JPOS	TurnAtCorner	; Execute turn routine if wall ahead
+	
+	CALL	ReadSonar
+	CALL	AdjustHeading
 
 Loop:
-    JUMP    ActionLoop
+	JUMP 	ActionLoop
+ 
+
+;Routine for adjusting target direction angle based on latest sonar reading and current leg.
+;Input, current sonar reading, must be in AC
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+AdjustHeading:
+	LOAD	Leg				; Determine in which direction to adjust based on current leg
+	SUB		BlueF
+	JZERO	Forward
+	ADD 	BlueF
+	SUB		WhiteF
+	JZERO	Forward
+	JUMP	Back	
+
+Forward:					; We are on forward leg
+	LOAD	SonarVal
+	SUB		Thresh
+	JPOS	CorrectRight	; Wall is too far
+	JNEG	CorrectLeft		; Wall is too close
+	JZERO	CorrectStraight ; Wall is just right
+	
+Back:						; We are on back leg
+	LOAD	SonarVal
+	SUB		Thresh
+	JPOS	CorrectLeft		; Wall is too far
+	JNEG	CorrectRight	; Wall is too close
+	JZERO	CorrectStraight ; Wall is just right
+	
+CorrectRight:				; Set Target Angle to Adjustment Angle
+	LOADI	-2
+	JUMP	Adjusted
+
+CorrectLeft:				; Set Target Angle to Adjustment Angle
+	LOADI	2
+	JUMP	Adjusted
+
+CorrectStraight:
+	LOAD	Zero
+	JUMP	Adjusted
+	
+Adjusted:
+	OUT 	SSEG1
+	STORE	TEMP
+	RETURN
+	
+	
+;Routine for obtaining a reading from the appropriate sonar depending on current leg.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ReadSonar:
+	LOAD	Leg				; Determine which sonar to read based on current leg
+	SUB		BlueF
+	JZERO	ReadR
+	ADD 	BlueF
+	SUB		WhiteF
+	JZERO	ReadR
+	JUMP	ReadL
+ReadL:
+	IN		DIST0
+	STORE	SonarVal
+	RETURN
+ReadR:
+	IN		DIST5
+	STORE	SonarVal
+	RETURN
 
 
-CorrectRight:               ; Set Target Angle to Adjustment Angle
-    ;LOAD   AdjTheta
-    LOADI   -5
-    OUT     SSEG1
-    STORE   TEMP
-    JUMP    Loop
+;Routine for filtering bad sonar values. Input, current sonar reading, must be in AC
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+Filter:
+	ADDI	-800
+	JNEG	GoodValue
+	LOAD	FSlow
+	STORE	DVel
+	LOADI	5
+	STORE	DTheta
+	CALL	Wait1
+	CALL	Wait1			; Turn and wait for 2 sec. Hope it turned
+	OUT     RESETPOS    	; reset the odometry to 0,0,0		
+	RETURN
+GoodValue:
+	ADDI	800
+	RETURN
 
-CorrectLeft:                ; Set Target Angle to Adjustment Angle
-    ;LOAD   AdjTheta
-    ;CALL   Abs
-    LOADI   5
-    OUT     SSEG1
-    STORE   TEMP
-    JUMP    Loop
-
+	
 ;Routine for turning at a corner. It accounts for the leg we are on
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 TurnAtCorner:
-    LOAD    Leg
-    SUB     BlueF
-    JZERO   LegBF
-    ADD     BlueF
-    SUB     WhiteF
-    JZERO   LegWF
-    ADD     WhiteF
-    SUB     WhiteB
-    JZERO   LegWB
-    JUMP    LegBB           ; Decide which leg we are currently on
+	LOAD	Leg
+	SUB		BlueF
+	JZERO	LegBF
+	ADD 	BlueF
+	SUB		WhiteF
+	JZERO	LegWF
+	ADD 	WhiteF
+	SUB		WhiteB
+	JZERO	LegWB
+	JUMP	LegBB			; Decide which leg we are currently on
 
 LegBF:
-    LOAD    FSlow
-    STORE   DVel
-    LOADI   90
-    STORE   DTheta
-    CALL    Wait1
-    CALL    Wait1           ; Turn and wait for 2 sec. Hope it turned
+	LOAD	FSlow
+	STORE	DVel
+	LOADI	90
+	STORE	DTheta
+	CALL	Wait1
+	CALL	Wait1			; Turn and wait for 2 sec. Hope it turned
+	
+	LOADI	250
+	STORE 	Thresh			; Update Threshold
 
-    OUT     RESETPOS        ; Reset odometry
-
-    LOADI   -200
-    STORE   RThresh
-    LOADI   -300
-    STORE   LThresh         ; Update Thresholds
-
-    LOAD    WhiteF
-    STORE   Leg             ; Update current leg
-
-    JUMP    Loop
+	LOAD	WhiteF
+	STORE 	Leg				; Update current leg
+	
+	LOAD	Zero
+	STORE	DTheta
+	;CALL	Align			; Align the robot parallel to the wall
+	OUT    	RESETPOS		; Reset odometry
+	JUMP	Loop
 
 LegWF:
-    LOAD    FSlow
-    STORE   DVel
-    LOADI   180
-    STORE   DTheta
-    CALL    Wait1
-    CALL    Wait1           ; Turn and wait for 2 sec. Hope it turned
+	LOAD	FSlow
+	STORE	DVel
+	LOADI	180
+	STORE	DTheta
+	CALL	Wait1
+	CALL	Wait1			; Turn and wait for 2 sec. Hope it turned
 
-    OUT     RESETPOS        ; Reset odometry
-
-    LOADI   -300
-    STORE   RThresh
-    LOADI   -200
-    STORE   LThresh         ; Update Thresholds
-
-    LOAD    WhiteB
-    STORE   Leg             ; Update current leg
-
-    JUMP    Loop
+	LOADI	250
+	STORE 	Thresh			; Update Threshold
+	
+	LOAD	WhiteB
+	STORE 	Leg				; Update current leg
+	
+	LOAD	Zero
+	STORE	DTheta
+	;CALL	Align			; Align the robot parallel to the wall
+	OUT    	RESETPOS		; Reset odometry
+	JUMP	Loop
 
 LegWB:
-    LOAD    FSlow
-    STORE   DVel
-    LOADI   -90
-    STORE   DTheta
-    CALL    Wait1
-    CALL    Wait1           ; Turn and wait for 2 sec. Hope it turned
+	LOAD	FSlow
+	STORE	DVel
+	LOADI	-90
+	STORE	DTheta
+	CALL	Wait1
+	CALL	Wait1			; Turn and wait for 2 sec. Hope it turned
 
-    OUT     RESETPOS        ; Reset odometry
+	LOADI	650
+	STORE 	Thresh			; Update Threshold
 
-    LOADI   -700
-    STORE   RThresh
-    LOADI   -600
-    STORE   LThresh         ; Update Thresholds
-
-    LOAD    BlueB
-    STORE   Leg             ; Update current leg
-
-    JUMP    Loop
+	LOAD	BlueB
+	STORE 	Leg				; Update current leg
+	
+	LOAD	Zero
+	STORE	DTheta
+	;CALL	Align			; Align the robot parallel to the wall
+	OUT    	RESETPOS		; Reset odometry
+	JUMP	Loop
 
 LegBB:
-    LOAD    FSlow
-    STORE   DVel
-    LOADI   180
-    STORE   DTheta
-    CALL    Wait1
-    CALL    Wait1           ; Turn and wait for 2 sec. Hope it turned
+	LOAD	FSlow
+	STORE	DVel
+	LOADI	180
+	STORE	DTheta
+	CALL	Wait1
+	CALL	Wait1			; Turn and wait for 2 sec. Hope it turned
+	
+	LOADI	650
+	STORE 	Thresh			; Update Threshold
 
-    OUT     RESETPOS        ; Reset odometry
-
-    LOADI   -600
-    STORE   RThresh
-    LOADI   -700
-    STORE   LThresh         ; Update Thresholds
-
-    LOAD    BlueF
-    STORE   Leg             ; Update current leg
-
-    JUMP    Loop
+	LOAD	BlueF
+	STORE 	Leg				; Update current leg
+	
+	LOAD	Zero
+	STORE	DTheta
+	;CALL	Align			; Align the robot parallel to the wall
+	OUT    	RESETPOS		; Reset odometry
+	JUMP	Loop
 
 
 ;Not connected to main code yet. Needs to be tested and bettered
 
 ;Routine for aligning the robot parallel with the wall
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-CorrectTheta:
-    IN      DIST5               ;Read Sonar
-    STORE   prevDist            ;Initial Reading
-    CALL    TimedTurn
-Test90Degree:
-    IN      DIST5               ;; based on sensor 5 (right sensor)
-    SUB     prevDist            ;; Create memory for PreviousDistance
-    ADDI    5                   ;implement threshold
-    OUT     SSEG2
-    JNEG    DoneTest90degree    ;; Done test 90 degrees
-    ;LOADI  5                   ;; ADJUSTMENT ANGLE (adjustable value)
-    IN      DIST5               ;; Loads previoussonar measurement
-    STORE   prevDist            ;; Store
-    OUT     Timer
-    CALL    TimedTurn
-    IN      DIST5
-    OUT     SSEG1               ;; TEST
-    JUMP    Test90Degree
+Align:						; Loop until distance from sonar increases, means we passed parallel
+	CALL	ReadSonar
+	STORE	PrevDist		; Read and store previous sensor distance
+	CALL	RotateL10ms
+	CALL	ReadSonar
+	OUT		SSEG2
+	SUB		PrevDist
+	ADDI	-3				; Threshold value 
+	JNEG	Align
+	
+	LOAD	Zero
+	STORE	DVel
+	OUT    	RESETPOS		; Reset odometry
+	CALL	Wait1
+	CALL 	Wait1
+	CALL 	Wait1
+	CALL 	Wait1
+	
+	RETURN
 
-
-DoneTest90degree:
-    ;; RETURN here to previous code Here
-    ;; CONTINUE CODE HERE
-    LOAD    FSlow
-    ;OUT        RVELCMD
-    ;OUT        LVELCMD
-    OUT     SSEG1
-    JUMP    DoneTest90Degree
-
-TimedTurn:
-    LOAD    FSlow               ;; +5 value means adjust toward right
-    OUT     RVELCMD
-    Load    RSlow
-    OUT     LVELCMD
-    IN      TIMER               ;read timer
-    OUT     SSEG1
-    ADDI    -1              ; check if 10 seconds elapsed
-    JNEG    TimedTurn
-    RETURN
+; Align subroutine to rotate for 10ms 
+RotateL10ms:
+	OUT 	Timer
+RotateLoop:
+	LOAD	FSlow			
+	OUT		RVELCMD
+	LOAD	RSlow
+	OUT		LVELCMD			; Write slow speed to motors
+	IN 		TIMER					
+	ADDI 	-1				
+	JNEG	RotateLoop		; Check if 10 ms elapsed
+	RETURN
 
 
 
 
 
 
-    ; note that the movement API will still be running during this
-    ; infinite loop, because it uses the timer interrupt, so the
-    ; robot will continue to attempt to match DTheta and DVel
+; CorrectTheta:
+; 	IN		DIST5				;Read Sonar
+; 	;-----------
+; 	STORE	TestSonarValue	
+; 	CALL	SonarFilter	
+; 	;----------
+; 	LOAD	TestSonarValue
+; 	STORE	prevDist			;Initial Reading
+; 	CALL	TimedTurn
+; Test90Degree:
+; 	IN		DIST5				;; based on sensor 5 (right sensor)
+; 	;----------------
+; 	STORE	TestSonarValue
+; 	CALL	SonarFilter
+; 	;;;-----------
+; 	SUB		prevDist			;; Create memory for PreviousDistance
+; 	;ADDI	5					;implement threshold
+; 	OUT		SSEG2
+; 	JNEG 	DoneTest90degree 	;; Done test 90 degrees
+; 	;LOADI 	5					;; ADJUSTMENT ANGLE (adjustable value)
+; 	IN		DIST5				;; Loads previoussonar measurement
+; 	STORE	prevDist			;; Store
+; 	OUT		Timer
+; 	CALL	TimedTurn
+; 	IN		DIST5
+; 	;;;;;;;;;;;;
+; 	STORE	TestSonarValue
+; 	CALL	SonarFilter
+; 	;;;;;;;;;;;;;
+; 	OUT		SSEG1				;; TEST
+; 	JUMP	Test90Degree	
+; 	
+; 	
+; DoneTest90degree:
+; 	;; RETURN here to previous code Here
+; 	;; CONTINUE CODE HERE
+; 	LOAD	FSlow
+;  	;OUT		RVELCMD
+;  	;OUT		LVELCMD
+;  	OUT		SSEG1
+; 	JUMP 	DoneTest90Degree
+; 	
+; TimedTurn: 
+; 	LOAD	FSlow				;; +5 value means adjust toward right
+; 	OUT		RVELCMD
+; 	Load	RSlow
+; 	OUT		LVELCMD
+; 	IN 		TIMER				;read timer	
+; 	OUT    	SSEG1
+; 	ADDI 	-1				; check if 10 ms elapsed
+; 	JNEG	TimedTurn			
+; 	RETURN
+; 
+; SonarFilter:
+; 	LOAD	TestSonarValue 	;Load in Sonar Value
+; 	JNEG	BadSonarValue	;
+; 	ADDI	-800			;
+; 	JPOS	BadSonarvalue	;
+; 	RETURN
+; BadSonarValue:
+; 	CALL	TimedTurn
+; 	JUMP	CorrectTheta
+; 	
+
+
+
+
+
+
+	; note that the movement API will still be running during this
+	; infinite loop, because it uses the timer interrupt, so the
+	; robot will continue to attempt to match DTheta and DVel
 
 
 
@@ -314,23 +415,23 @@ Die:
 ; Sometimes it's useful to permanently stop execution.
 ; This will also catch the execution if it accidentally
 ; falls through from above.
-    CLI    &B1111      ; disable all interrupts
-    LOAD   Zero        ; Stop everything.
-    OUT    LVELCMD
-    OUT    RVELCMD
-    OUT    SONAREN
-    LOAD   DEAD        ; An indication that we are dead
-    OUT    SSEG2       ; "dEAd" on the sseg
+	CLI    &B1111      ; disable all interrupts
+	LOAD   Zero        ; Stop everything.
+	OUT    LVELCMD
+	OUT    RVELCMD
+	OUT    SONAREN
+	LOAD   DEAD        ; An indication that we are dead
+	OUT    SSEG2       ; "dEAd" on the sseg
 Forever:
-    JUMP   Forever     ; Do this forever.
-    DEAD:  DW &HDEAD   ; Example of a "local" variable
+	JUMP   Forever     ; Do this forever.
+	DEAD:  DW &HDEAD   ; Example of a "local" variable
 
 
 ; Timer ISR.  Currently just calls the movement control code.
 ; You could, however, do additional tasks here if desired.
 CTimer_ISR:
-    CALL   ControlMovement
-    RETI   ; return from ISR
+	CALL   ControlMovement
+	RETI   ; return from ISR
 
 
 ; Control code.  If called repeatedly, this code will attempt
@@ -339,95 +440,95 @@ CTimer_ISR:
 DTheta:    DW 0
 DVel:      DW 0
 ControlMovement:
-    LOADI  50          ; used for the CapValue subroutine
-    STORE  MaxVal
-    CALL   GetThetaErr ; get the heading error
-    ; A simple way to get a decent velocity value
-    ; for turning is to multiply the angular error by 4
-    ; and add ~50.
-    SHIFT  2
-    STORE  CMAErr      ; hold temporarily
-    SHIFT  2           ; multiply by another 4
-    CALL   CapValue    ; get a +/- max of 50
-    ADD    CMAErr
-    STORE  CMAErr      ; now contains a desired differential
+	LOADI  50          ; used for the CapValue subroutine
+	STORE  MaxVal
+	CALL   GetThetaErr ; get the heading error
+	; A simple way to get a decent velocity value
+	; for turning is to multiply the angular error by 4
+	; and add ~50.
+	SHIFT  2
+	STORE  CMAErr      ; hold temporarily
+	SHIFT  2           ; multiply by another 4
+	CALL   CapValue    ; get a +/- max of 50
+	ADD    CMAErr
+	STORE  CMAErr      ; now contains a desired differential
 
 
-    ; For this basic control method, simply take the
-    ; desired forward velocity and add the differential
-    ; velocity for each wheel when turning is needed.
-    LOADI  510
-    STORE  MaxVal
-    LOAD   DVel
-    CALL   CapValue    ; ensure velocity is valid
-    STORE  DVel        ; overwrite any invalid input
-    ADD    CMAErr
-    CALL   CapValue    ; ensure velocity is valid
-    STORE  CMAR
-    LOAD   CMAErr
-    CALL   Neg         ; left wheel gets negative differential
-    ADD    DVel
-    CALL   CapValue
-    STORE  CMAL
+	; For this basic control method, simply take the
+	; desired forward velocity and add the differential
+	; velocity for each wheel when turning is needed.
+	LOADI  510
+	STORE  MaxVal
+	LOAD   DVel
+	CALL   CapValue    ; ensure velocity is valid
+	STORE  DVel        ; overwrite any invalid input
+	ADD    CMAErr
+	CALL   CapValue    ; ensure velocity is valid
+	STORE  CMAR
+	LOAD   CMAErr
+	CALL   Neg         ; left wheel gets negative differential
+	ADD    DVel
+	CALL   CapValue
+	STORE  CMAL
 
-    ; ensure enough differential is applied
-    LOAD   CMAErr
-    SHIFT  1           ; double the differential
-    STORE  CMAErr
-    LOAD   CMAR
-    SUB    CMAL        ; calculate the actual differential
-    SUB    CMAErr      ; should be 0 if nothing got capped
-    JZERO  CMADone
-    ; re-apply any missing differential
-    STORE  CMAErr      ; the missing part
-    ADD    CMAL
-    CALL   CapValue
-    STORE  CMAL
-    LOAD   CMAR
-    SUB    CMAErr
-    CALL   CapValue
-    STORE  CMAR
+	; ensure enough differential is applied
+	LOAD   CMAErr
+	SHIFT  1           ; double the differential
+	STORE  CMAErr
+	LOAD   CMAR
+	SUB    CMAL        ; calculate the actual differential
+	SUB    CMAErr      ; should be 0 if nothing got capped
+	JZERO  CMADone
+	; re-apply any missing differential
+	STORE  CMAErr      ; the missing part
+	ADD    CMAL
+	CALL   CapValue
+	STORE  CMAL
+	LOAD   CMAR
+	SUB    CMAErr
+	CALL   CapValue
+	STORE  CMAR
 
 CMADone:
-    LOAD   CMAL
-    OUT    LVELCMD
-    LOAD   CMAR
-    OUT    RVELCMD
+	LOAD   CMAL
+	OUT    LVELCMD
+	LOAD   CMAR
+	OUT    RVELCMD
 
-    RETURN
-    CMAErr: DW 0       ; holds angle error velocity
-    CMAL:    DW 0      ; holds temp left velocity
-    CMAR:    DW 0      ; holds temp right velocity
+	RETURN
+	CMAErr: DW 0       ; holds angle error velocity
+	CMAL:    DW 0      ; holds temp left velocity
+	CMAR:    DW 0      ; holds temp right velocity
 
 ; Returns the current angular error wrapped to +/-180
 GetThetaErr:
-    ; convenient way to get angle error in +/-180 range is
-    ; ((error + 180) % 360 ) - 180
-    IN     THETA
-    SUB    DTheta      ; actual - desired angle
-    CALL   Neg         ; desired - actual angle
-    ADDI   180
-    CALL   Mod360
-    ADDI   -180
-    RETURN
+	; convenient way to get angle error in +/-180 range is
+	; ((error + 180) % 360 ) - 180
+	IN     THETA
+	SUB    DTheta      ; actual - desired angle
+	CALL   Neg         ; desired - actual angle
+	ADDI   180
+	CALL   Mod360
+	ADDI   -180
+	RETURN
 
 ; caps a value to +/-MaxVal
 CapValue:
-    SUB     MaxVal
-    JPOS    CapVelHigh
-    ADD     MaxVal
-    ADD     MaxVal
-    JNEG    CapVelLow
-    SUB     MaxVal
-    RETURN
+	SUB     MaxVal
+	JPOS    CapVelHigh
+	ADD     MaxVal
+	ADD     MaxVal
+	JNEG    CapVelLow
+	SUB     MaxVal
+	RETURN
 CapVelHigh:
-    LOAD    MaxVal
-    RETURN
+	LOAD    MaxVal
+	RETURN
 CapVelLow:
-    LOAD    MaxVal
-    CALL    Neg
-    RETURN
-    MaxVal: DW 510
+	LOAD    MaxVal
+	CALL    Neg
+	RETURN
+	MaxVal: DW 510
 
 
 ;*******************************************************************************
@@ -436,14 +537,14 @@ CapVelLow:
 ; Written by Kevin Johnson.  No licence or copyright applied.
 ;*******************************************************************************
 Mod360:
-    ; easy modulo: subtract 360 until negative then add 360 until not negative
-    JNEG   M360N
-    ADDI   -360
-    JUMP   Mod360
+	; easy modulo: subtract 360 until negative then add 360 until not negative
+	JNEG   M360N
+	ADDI   -360
+	JUMP   Mod360
 M360N:
-    ADDI   360
-    JNEG   M360N
-    RETURN
+	ADDI   360
+	JNEG   M360N
+	RETURN
 
 ;*******************************************************************************
 ; Abs: 2's complement absolute value
@@ -453,12 +554,12 @@ M360N:
 ; Written by Kevin Johnson.  No licence or copyright applied.
 ;*******************************************************************************
 Abs:
-    JPOS   Abs_r
+	JPOS   Abs_r
 Neg:
-    XOR    NegOne       ; Flip all bits
-    ADDI   1            ; Add one (i.e. negate number)
+	XOR    NegOne       ; Flip all bits
+	ADDI   1            ; Add one (i.e. negate number)
 Abs_r:
-    RETURN
+	RETURN
 
 ;******************************************************************************;
 ; Atan2: 4-quadrant arctangent calculation                                     ;
@@ -482,113 +583,113 @@ Abs_r:
 ; - LowByte: DW &HFF                                                           ;
 ;******************************************************************************;
 Atan2:
-    LOAD   AtanY
-    CALL   Abs          ; abs(y)
-    STORE  AtanT
-    LOAD   AtanX        ; abs(x)
-    CALL   Abs
-    SUB    AtanT        ; abs(x) - abs(y)
-    JNEG   A2_sw        ; if abs(y) > abs(x), switch arguments.
-    LOAD   AtanX        ; Octants 1, 4, 5, 8
-    JNEG   A2_R3
-    CALL   A2_calc      ; Octants 1, 8
-    JNEG   A2_R1n
-    RETURN              ; Return raw value if in octant 1
+	LOAD   AtanY
+	CALL   Abs          ; abs(y)
+	STORE  AtanT
+	LOAD   AtanX        ; abs(x)
+	CALL   Abs
+	SUB    AtanT        ; abs(x) - abs(y)
+	JNEG   A2_sw        ; if abs(y) > abs(x), switch arguments.
+	LOAD   AtanX        ; Octants 1, 4, 5, 8
+	JNEG   A2_R3
+	CALL   A2_calc      ; Octants 1, 8
+	JNEG   A2_R1n
+	RETURN              ; Return raw value if in octant 1
 A2_R1n: ; region 1 negative
-    ADDI   360          ; Add 360 if we are in octant 8
-    RETURN
+	ADDI   360          ; Add 360 if we are in octant 8
+	RETURN
 A2_R3: ; region 3
-    CALL   A2_calc      ; Octants 4, 5
-    ADDI   180          ; theta' = theta + 180
-    RETURN
+	CALL   A2_calc      ; Octants 4, 5
+	ADDI   180          ; theta' = theta + 180
+	RETURN
 A2_sw: ; switch arguments; octants 2, 3, 6, 7
-    LOAD   AtanY        ; Swap input arguments
-    STORE  AtanT
-    LOAD   AtanX
-    STORE  AtanY
-    LOAD   AtanT
-    STORE  AtanX
-    JPOS   A2_R2        ; If Y positive, octants 2,3
-    CALL   A2_calc      ; else octants 6, 7
-    CALL   Neg          ; Negatge the number
-    ADDI   270          ; theta' = 270 - theta
-    RETURN
+	LOAD   AtanY        ; Swap input arguments
+	STORE  AtanT
+	LOAD   AtanX
+	STORE  AtanY
+	LOAD   AtanT
+	STORE  AtanX
+	JPOS   A2_R2        ; If Y positive, octants 2,3
+	CALL   A2_calc      ; else octants 6, 7
+	CALL   Neg          ; Negatge the number
+	ADDI   270          ; theta' = 270 - theta
+	RETURN
 A2_R2: ; region 2
-    CALL   A2_calc      ; Octants 2, 3
-    CALL   Neg          ; negate the angle
-    ADDI   90           ; theta' = 90 - theta
-    RETURN
+	CALL   A2_calc      ; Octants 2, 3
+	CALL   Neg          ; negate the angle
+	ADDI   90           ; theta' = 90 - theta
+	RETURN
 A2_calc:
-    ; calculates R/(1 + 0.28125*R^2)
-    LOAD   AtanY
-    STORE  d16sN        ; Y in numerator
-    LOAD   AtanX
-    STORE  d16sD        ; X in denominator
-    CALL   A2_div       ; divide
-    LOAD   dres16sQ     ; get the quotient (remainder ignored)
-    STORE  AtanRatio
-    STORE  m16sA
-    STORE  m16sB
-    CALL   A2_mult      ; X^2
-    STORE  m16sA
-    LOAD   A2c
-    STORE  m16sB
-    CALL   A2_mult
-    ADDI   256          ; 256/256+0.28125X^2
-    STORE  d16sD
-    LOAD   AtanRatio
-    STORE  d16sN        ; Ratio in numerator
-    CALL   A2_div       ; divide
-    LOAD   dres16sQ     ; get the quotient (remainder ignored)
-    STORE  m16sA        ; <= result in radians
-    LOAD   A2cd         ; degree conversion factor
-    STORE  m16sB
-    CALL   A2_mult      ; convert to degrees
-    STORE  AtanT
-    SHIFT  -7           ; check 7th bit
-    AND    One
-    JZERO  A2_rdwn      ; round down
-    LOAD   AtanT
-    SHIFT  -8
-    ADDI   1            ; round up
-    RETURN
+	; calculates R/(1 + 0.28125*R^2)
+	LOAD   AtanY
+	STORE  d16sN        ; Y in numerator
+	LOAD   AtanX
+	STORE  d16sD        ; X in denominator
+	CALL   A2_div       ; divide
+	LOAD   dres16sQ     ; get the quotient (remainder ignored)
+	STORE  AtanRatio
+	STORE  m16sA
+	STORE  m16sB
+	CALL   A2_mult      ; X^2
+	STORE  m16sA
+	LOAD   A2c
+	STORE  m16sB
+	CALL   A2_mult
+	ADDI   256          ; 256/256+0.28125X^2
+	STORE  d16sD
+	LOAD   AtanRatio
+	STORE  d16sN        ; Ratio in numerator
+	CALL   A2_div       ; divide
+	LOAD   dres16sQ     ; get the quotient (remainder ignored)
+	STORE  m16sA        ; <= result in radians
+	LOAD   A2cd         ; degree conversion factor
+	STORE  m16sB
+	CALL   A2_mult      ; convert to degrees
+	STORE  AtanT
+	SHIFT  -7           ; check 7th bit
+	AND    One
+	JZERO  A2_rdwn      ; round down
+	LOAD   AtanT
+	SHIFT  -8
+	ADDI   1            ; round up
+	RETURN
 A2_rdwn:
-    LOAD   AtanT
-    SHIFT  -8           ; round down
-    RETURN
+	LOAD   AtanT
+	SHIFT  -8           ; round down
+	RETURN
 A2_mult: ; multiply, and return bits 23..8 of result
-    CALL   Mult16s
-    LOAD   mres16sH
-    SHIFT  8            ; move high word of result up 8 bits
-    STORE  mres16sH
-    LOAD   mres16sL
-    SHIFT  -8           ; move low word of result down 8 bits
-    AND    LowByte
-    OR     mres16sH     ; combine high and low words of result
-    RETURN
+	CALL   Mult16s
+	LOAD   mres16sH
+	SHIFT  8            ; move high word of result up 8 bits
+	STORE  mres16sH
+	LOAD   mres16sL
+	SHIFT  -8           ; move low word of result down 8 bits
+	AND    LowByte
+	OR     mres16sH     ; combine high and low words of result
+	RETURN
 A2_div: ; 16-bit division scaled by 256, minimizing error
-    LOADI  9            ; loop 8 times (256 = 2^8)
-    STORE  AtanT
+	LOADI  9            ; loop 8 times (256 = 2^8)
+	STORE  AtanT
 A2_DL:
-    LOAD   AtanT
-    ADDI   -1
-    JPOS   A2_DN        ; not done; continue shifting
-    CALL   Div16s       ; do the standard division
-    RETURN
+	LOAD   AtanT
+	ADDI   -1
+	JPOS   A2_DN        ; not done; continue shifting
+	CALL   Div16s       ; do the standard division
+	RETURN
 A2_DN:
-    STORE  AtanT
-    LOAD   d16sN        ; start by trying to scale the numerator
-    SHIFT  1
-    XOR    d16sN        ; if the sign changed,
-    JNEG   A2_DD        ; switch to scaling the denominator
-    XOR    d16sN        ; get back shifted version
-    STORE  d16sN
-    JUMP   A2_DL
+	STORE  AtanT
+	LOAD   d16sN        ; start by trying to scale the numerator
+	SHIFT  1
+	XOR    d16sN        ; if the sign changed,
+	JNEG   A2_DD        ; switch to scaling the denominator
+	XOR    d16sN        ; get back shifted version
+	STORE  d16sN
+	JUMP   A2_DL
 A2_DD:
-    LOAD   d16sD
-    SHIFT  -1           ; have to scale denominator
-    STORE  d16sD
-    JUMP   A2_DL
+	LOAD   d16sD
+	SHIFT  -1           ; have to scale denominator
+	STORE  d16sD
+	JUMP   A2_DL
 AtanX:      DW 0
 AtanY:      DW 0
 AtanRatio:  DW 0        ; =y/x
@@ -607,43 +708,43 @@ A2cd:       DW 14668    ; = 180/pi with 8 fractional bits
 ; - Result is stored in mres16sH and mres16sL (high and low words).
 ;*******************************************************************************
 Mult16s:
-    LOADI  0
-    STORE  m16sc        ; clear carry
-    STORE  mres16sH     ; clear result
-    LOADI  16           ; load 16 to counter
+	LOADI  0
+	STORE  m16sc        ; clear carry
+	STORE  mres16sH     ; clear result
+	LOADI  16           ; load 16 to counter
 Mult16s_loop:
-    STORE  mcnt16s
-    LOAD   m16sc        ; check the carry (from previous iteration)
-    JZERO  Mult16s_noc  ; if no carry, move on
-    LOAD   mres16sH     ; if a carry,
-    ADD    m16sA        ;  add multiplicand to result H
-    STORE  mres16sH
+	STORE  mcnt16s
+	LOAD   m16sc        ; check the carry (from previous iteration)
+	JZERO  Mult16s_noc  ; if no carry, move on
+	LOAD   mres16sH     ; if a carry,
+	ADD    m16sA        ;  add multiplicand to result H
+	STORE  mres16sH
 Mult16s_noc: ; no carry
-    LOAD   m16sB
-    AND    One          ; check bit 0 of multiplier
-    STORE  m16sc        ; save as next carry
-    JZERO  Mult16s_sh   ; if no carry, move on to shift
-    LOAD   mres16sH     ; if bit 0 set,
-    SUB    m16sA        ;  subtract multiplicand from result H
-    STORE  mres16sH
+	LOAD   m16sB
+	AND    One          ; check bit 0 of multiplier
+	STORE  m16sc        ; save as next carry
+	JZERO  Mult16s_sh   ; if no carry, move on to shift
+	LOAD   mres16sH     ; if bit 0 set,
+	SUB    m16sA        ;  subtract multiplicand from result H
+	STORE  mres16sH
 Mult16s_sh:
-    LOAD   m16sB
-    SHIFT  -1           ; shift result L >>1
-    AND    c7FFF        ; clear msb
-    STORE  m16sB
-    LOAD   mres16sH     ; load result H
-    SHIFT  15           ; move lsb to msb
-    OR     m16sB
-    STORE  m16sB        ; result L now includes carry out from H
-    LOAD   mres16sH
-    SHIFT  -1
-    STORE  mres16sH     ; shift result H >>1
-    LOAD   mcnt16s
-    ADDI   -1           ; check counter
-    JPOS   Mult16s_loop ; need to iterate 16 times
-    LOAD   m16sB
-    STORE  mres16sL     ; multiplier and result L shared a word
-    RETURN              ; Done
+	LOAD   m16sB
+	SHIFT  -1           ; shift result L >>1
+	AND    c7FFF        ; clear msb
+	STORE  m16sB
+	LOAD   mres16sH     ; load result H
+	SHIFT  15           ; move lsb to msb
+	OR     m16sB
+	STORE  m16sB        ; result L now includes carry out from H
+	LOAD   mres16sH
+	SHIFT  -1
+	STORE  mres16sH     ; shift result H >>1
+	LOAD   mcnt16s
+	ADDI   -1           ; check counter
+	JPOS   Mult16s_loop ; need to iterate 16 times
+	LOAD   m16sB
+	STORE  mres16sL     ; multiplier and result L shared a word
+	RETURN              ; Done
 c7FFF: DW &H7FFF
 m16sA: DW 0 ; multiplicand
 m16sB: DW 0 ; multipler
@@ -663,59 +764,59 @@ mres16sH: DW 0 ; result high
 ; Requires Abs subroutine
 ;*******************************************************************************
 Div16s:
-    LOADI  0
-    STORE  dres16sR     ; clear remainder result
-    STORE  d16sC1       ; clear carry
-    LOAD   d16sN
-    XOR    d16sD
-    STORE  d16sS        ; sign determination = N XOR D
-    LOADI  17
-    STORE  d16sT        ; preload counter with 17 (16+1)
-    LOAD   d16sD
-    CALL   Abs          ; take absolute value of denominator
-    STORE  d16sD
-    LOAD   d16sN
-    CALL   Abs          ; take absolute value of numerator
-    STORE  d16sN
+	LOADI  0
+	STORE  dres16sR     ; clear remainder result
+	STORE  d16sC1       ; clear carry
+	LOAD   d16sN
+	XOR    d16sD
+	STORE  d16sS        ; sign determination = N XOR D
+	LOADI  17
+	STORE  d16sT        ; preload counter with 17 (16+1)
+	LOAD   d16sD
+	CALL   Abs          ; take absolute value of denominator
+	STORE  d16sD
+	LOAD   d16sN
+	CALL   Abs          ; take absolute value of numerator
+	STORE  d16sN
 Div16s_loop:
-    LOAD   d16sN
-    SHIFT  -15          ; get msb
-    AND    One          ; only msb (because shift is arithmetic)
-    STORE  d16sC2       ; store as carry
-    LOAD   d16sN
-    SHIFT  1            ; shift <<1
-    OR     d16sC1       ; with carry
-    STORE  d16sN
-    LOAD   d16sT
-    ADDI   -1           ; decrement counter
-    JZERO  Div16s_sign  ; if finished looping, finalize result
-    STORE  d16sT
-    LOAD   dres16sR
-    SHIFT  1            ; shift remainder
-    OR     d16sC2       ; with carry from other shift
-    SUB    d16sD        ; subtract denominator from remainder
-    JNEG   Div16s_add   ; if negative, need to add it back
-    STORE  dres16sR
-    LOADI  1
-    STORE  d16sC1       ; set carry
-    JUMP   Div16s_loop
+	LOAD   d16sN
+	SHIFT  -15          ; get msb
+	AND    One          ; only msb (because shift is arithmetic)
+	STORE  d16sC2       ; store as carry
+	LOAD   d16sN
+	SHIFT  1            ; shift <<1
+	OR     d16sC1       ; with carry
+	STORE  d16sN
+	LOAD   d16sT
+	ADDI   -1           ; decrement counter
+	JZERO  Div16s_sign  ; if finished looping, finalize result
+	STORE  d16sT
+	LOAD   dres16sR
+	SHIFT  1            ; shift remainder
+	OR     d16sC2       ; with carry from other shift
+	SUB    d16sD        ; subtract denominator from remainder
+	JNEG   Div16s_add   ; if negative, need to add it back
+	STORE  dres16sR
+	LOADI  1
+	STORE  d16sC1       ; set carry
+	JUMP   Div16s_loop
 Div16s_add:
-    ADD    d16sD        ; add denominator back in
-    STORE  dres16sR
-    LOADI  0
-    STORE  d16sC1       ; clear carry
-    JUMP   Div16s_loop
+	ADD    d16sD        ; add denominator back in
+	STORE  dres16sR
+	LOADI  0
+	STORE  d16sC1       ; clear carry
+	JUMP   Div16s_loop
 Div16s_sign:
-    LOAD   d16sN
-    STORE  dres16sQ     ; numerator was used to hold quotient result
-    LOAD   d16sS        ; check the sign indicator
-    JNEG   Div16s_neg
-    RETURN
+	LOAD   d16sN
+	STORE  dres16sQ     ; numerator was used to hold quotient result
+	LOAD   d16sS        ; check the sign indicator
+	JNEG   Div16s_neg
+	RETURN
 Div16s_neg:
-    LOAD   dres16sQ     ; need to negate the result
-    CALL   Neg
-    STORE  dres16sQ
-    RETURN
+	LOAD   dres16sQ     ; need to negate the result
+	CALL   Neg
+	STORE  dres16sQ
+	RETURN
 d16sN: DW 0 ; numerator
 d16sD: DW 0 ; denominator
 d16sS: DW 0 ; sign value
@@ -738,52 +839,52 @@ dres16sR: DW 0 ; remainder result
 ; Requires Abs and Mult16s subroutines.
 ;*******************************************************************************
 L2Estimate:
-    ; take abs() of each value, and find the largest one
-    LOAD   L2X
-    CALL   Abs
-    STORE  L2T1
-    LOAD   L2Y
-    CALL   Abs
-    SUB    L2T1
-    JNEG   GDSwap    ; swap if needed to get largest value in X
-    ADD    L2T1
+	; take abs() of each value, and find the largest one
+	LOAD   L2X
+	CALL   Abs
+	STORE  L2T1
+	LOAD   L2Y
+	CALL   Abs
+	SUB    L2T1
+	JNEG   GDSwap    ; swap if needed to get largest value in X
+	ADD    L2T1
 CalcDist:
-    ; Calculation is max(X,Y)*0.961+min(X,Y)*0.406
-    STORE  m16sa
-    LOADI  246       ; max * 246
-    STORE  m16sB
-    CALL   Mult16s
-    LOAD   mres16sH
-    SHIFT  8
-    STORE  L2T2
-    LOAD   mres16sL
-    SHIFT  -8        ; / 256
-    AND    LowByte
-    OR     L2T2
-    STORE  L2T3
-    LOAD   L2T1
-    STORE  m16sa
-    LOADI  104       ; min * 104
-    STORE  m16sB
-    CALL   Mult16s
-    LOAD   mres16sH
-    SHIFT  8
-    STORE  L2T2
-    LOAD   mres16sL
-    SHIFT  -8        ; / 256
-    AND    LowByte
-    OR     L2T2
-    ADD    L2T3     ; sum
-    RETURN
+	; Calculation is max(X,Y)*0.961+min(X,Y)*0.406
+	STORE  m16sa
+	LOADI  246       ; max * 246
+	STORE  m16sB
+	CALL   Mult16s
+	LOAD   mres16sH
+	SHIFT  8
+	STORE  L2T2
+	LOAD   mres16sL
+	SHIFT  -8        ; / 256
+	AND    LowByte
+	OR     L2T2
+	STORE  L2T3
+	LOAD   L2T1
+	STORE  m16sa
+	LOADI  104       ; min * 104
+	STORE  m16sB
+	CALL   Mult16s
+	LOAD   mres16sH
+	SHIFT  8
+	STORE  L2T2
+	LOAD   mres16sL
+	SHIFT  -8        ; / 256
+	AND    LowByte
+	OR     L2T2
+	ADD    L2T3     ; sum
+	RETURN
 GDSwap: ; swaps the incoming X and Y
-    ADD    L2T1
-    STORE  L2T2
-    LOAD   L2T1
-    STORE  L2T3
-    LOAD   L2T2
-    STORE  L2T1
-    LOAD   L2T3
-    JUMP   CalcDist
+	ADD    L2T1
+	STORE  L2T2
+	LOAD   L2T1
+	STORE  L2T3
+	LOAD   L2T2
+	STORE  L2T1
+	LOAD   L2T3
+	JUMP   CalcDist
 L2X:  DW 0
 L2Y:  DW 0
 L2T1: DW 0
@@ -793,86 +894,86 @@ L2T3: DW 0
 
 ; Subroutine to wait (block) for 1 second
 Wait1:
-    OUT    TIMER
+	OUT    TIMER
 Wloop:
-    IN     TIMER
-    OUT    XLEDS       ; User-feedback that a pause is occurring.
-    ADDI   -10         ; 1 second at 10Hz.
-    JNEG   Wloop
-    RETURN
+	IN     TIMER
+	OUT    XLEDS       ; User-feedback that a pause is occurring.
+	ADDI   -10         ; 1 second at 10Hz.
+	JNEG   Wloop
+	RETURN
 
 ; This subroutine will get the battery voltage,
 ; and stop program execution if it is too low.
 ; SetupI2C must be executed prior to this.
 BattCheck:
-    CALL   GetBattLvl
-    JZERO  BattCheck   ; A/D hasn't had time to initialize
-    SUB    MinBatt
-    JNEG   DeadBatt
-    ADD    MinBatt     ; get original value back
-    RETURN
+	CALL   GetBattLvl
+	JZERO  BattCheck   ; A/D hasn't had time to initialize
+	SUB    MinBatt
+	JNEG   DeadBatt
+	ADD    MinBatt     ; get original value back
+	RETURN
 ; If the battery is too low, we want to make
 ; sure that the user realizes it...
 DeadBatt:
-    LOADI  &H20
-    OUT    BEEP        ; start beep sound
-    CALL   GetBattLvl  ; get the battery level
-    OUT    SSEG1       ; display it everywhere
-    OUT    SSEG2
-    OUT    LCD
-    LOAD   Zero
-    ADDI   -1          ; 0xFFFF
-    OUT    LEDS        ; all LEDs on
-    OUT    XLEDS
-    CALL   Wait1       ; 1 second
-    LOADI  &H140       ; short, high-pitched beep
-    OUT    BEEP        ; stop beeping
-    LOAD   Zero
-    OUT    LEDS        ; LEDs off
-    OUT    XLEDS
-    CALL   Wait1       ; 1 second
-    JUMP   DeadBatt    ; repeat forever
+	LOADI  &H20
+	OUT    BEEP        ; start beep sound
+	CALL   GetBattLvl  ; get the battery level
+	OUT    SSEG1       ; display it everywhere
+	OUT    SSEG2
+	OUT    LCD
+	LOAD   Zero
+	ADDI   -1          ; 0xFFFF
+	OUT    LEDS        ; all LEDs on
+	OUT    XLEDS
+	CALL   Wait1       ; 1 second
+	LOADI  &H140       ; short, high-pitched beep
+	OUT    BEEP        ; stop beeping
+	LOAD   Zero
+	OUT    LEDS        ; LEDs off
+	OUT    XLEDS
+	CALL   Wait1       ; 1 second
+	JUMP   DeadBatt    ; repeat forever
 
 ; Subroutine to read the A/D (battery voltage)
 ; Assumes that SetupI2C has been run
 GetBattLvl:
-    LOAD   I2CRCmd     ; 0x0190 (write 0B, read 1B, addr 0x90)
-    OUT    I2C_CMD     ; to I2C_CMD
-    OUT    I2C_RDY     ; start the communication
-    CALL   BlockI2C    ; wait for it to finish
-    IN     I2C_DATA    ; get the returned data
-    RETURN
+	LOAD   I2CRCmd     ; 0x0190 (write 0B, read 1B, addr 0x90)
+	OUT    I2C_CMD     ; to I2C_CMD
+	OUT    I2C_RDY     ; start the communication
+	CALL   BlockI2C    ; wait for it to finish
+	IN     I2C_DATA    ; get the returned data
+	RETURN
 
 ; Subroutine to configure the I2C for reading batt voltage
 ; Only needs to be done once after each reset.
 SetupI2C:
-    CALL   BlockI2C    ; wait for idle
-    LOAD   I2CWCmd     ; 0x1190 (write 1B, read 1B, addr 0x90)
-    OUT    I2C_CMD     ; to I2C_CMD register
-    LOAD   Zero        ; 0x0000 (A/D port 0, no increment)
-    OUT    I2C_DATA    ; to I2C_DATA register
-    OUT    I2C_RDY     ; start the communication
-    CALL   BlockI2C    ; wait for it to finish
-    RETURN
+	CALL   BlockI2C    ; wait for idle
+	LOAD   I2CWCmd     ; 0x1190 (write 1B, read 1B, addr 0x90)
+	OUT    I2C_CMD     ; to I2C_CMD register
+	LOAD   Zero        ; 0x0000 (A/D port 0, no increment)
+	OUT    I2C_DATA    ; to I2C_DATA register
+	OUT    I2C_RDY     ; start the communication
+	CALL   BlockI2C    ; wait for it to finish
+	RETURN
 
 ; Subroutine to block until I2C device is idle
 BlockI2C:
-    LOAD   Zero
-    STORE  Temp        ; Used to check for timeout
+	LOAD   Zero
+	STORE  Temp        ; Used to check for timeout
 BI2CL:
-    LOAD   Temp
-    ADDI   1           ; this will result in ~0.1s timeout
-    STORE  Temp
-    JZERO  I2CError    ; Timeout occurred; error
-    IN     I2C_RDY     ; Read busy signal
-    JPOS   BI2CL       ; If not 0, try again
-    RETURN             ; Else return
+	LOAD   Temp
+	ADDI   1           ; this will result in ~0.1s timeout
+	STORE  Temp
+	JZERO  I2CError    ; Timeout occurred; error
+	IN     I2C_RDY     ; Read busy signal
+	JPOS   BI2CL       ; If not 0, try again
+	RETURN             ; Else return
 I2CError:
-    LOAD   Zero
-    ADDI   &H12C       ; "I2C"
-    OUT    SSEG1
-    OUT    SSEG2       ; display error message
-    JUMP   I2CError
+	LOAD   Zero
+	ADDI   &H12C       ; "I2C"
+	OUT    SSEG1
+	OUT    SSEG2       ; display error message
+	JUMP   I2CError
 
 ;***************************************************************
 ;* Variables
@@ -880,9 +981,12 @@ I2CError:
 Temp:     DW 0 ; "Temp" is not a great name, but can be useful
 RThresh:  DW 0
 LThresh:  DW 0
+Thresh:	  DW 0
 TurnAng:  DW 0
-Leg:      DW 0 ; Represents current state
-prevDist: DW 0 ; "prevDist"
+Leg:	  DW 0 ; Represents current state
+PrevDist: DW 0 ; "prevDist"
+TestSonarValue:	DW 0
+SonarVal:	  DW 0
 
 
 ;***************************************************************
@@ -921,7 +1025,7 @@ Mask6:    DW &B01000000
 Mask7:    DW &B10000000
 LowByte:  DW &HFF      ; binary 00000000 1111111
 LowNibl:  DW &HF       ; 0000 0000 0000 1111
-Mask23:   DW &B00001100
+Mask23:	  DW &B00001100
 
 ; some useful movement values
 OneMeter: DW 961       ; ~1m in 1.04mm units
@@ -945,7 +1049,7 @@ I2CWCmd:  DW &H1190    ; write one i2c byte, read one byte, addr 0x90
 I2CRCmd:  DW &H0190    ; write nothing, read one byte, addr 0x90
 
 DataArray:
-    DW 0
+	DW 0
 ;***************************************************************
 ;* IO address space map
 ;***************************************************************
