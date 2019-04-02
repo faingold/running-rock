@@ -75,6 +75,7 @@ Main:
 	; execute CLI &B0010 to disable the timer interrupt.
 
 ; Initial Setup
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 	LOADI 	&b00101101
 	OUT 	SONAREN     	; Enable Sonars
 	LOADI 	&b00000000
@@ -97,6 +98,7 @@ Main:
 	
 ;This loop keeps repeating as the robot runs
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ActionLoop:
 	LOAD	Temp			; Load target angle
 	STORE 	DTheta			; Update target direction
@@ -108,13 +110,19 @@ ActionLoop:
 
 	IN		SONALARM		; Read sonar alarm data
 	AND		Mask23			; Mask to only get values of 2 forward sensors
-	JPOS	TurnAtCorner	; Execute turn routine if wall ahead
-	
+	JPOS	Wall			; Execute turn routine if wall ahead
+	JUMP	NoWall			; Don't do anything if there is no wall
+Wall:
+	CALL	Turn
+NoWall:
+
 	CALL	ReadSonar
 	CALL	AdjustHeading
 
 Loop:
 	JUMP 	ActionLoop
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
  
 
 ;Routine for adjusting target direction angle based on latest sonar reading and current leg.
@@ -132,7 +140,9 @@ AdjustHeading:
 Forward:					; We are on forward leg
 	LOAD	SonarVal
 	SUB		Thresh
+	;ADDI	-20				; Offset to create a corridor
 	JPOS	CorrectRight	; Wall is too far
+	;ADDI	40				; Offset to create a corridor
 	JNEG	CorrectLeft		; Wall is too close
 	JZERO	CorrectStraight ; Wall is just right
 	
@@ -147,7 +157,7 @@ CorrectRight:				; Set Target Angle to Adjustment Angle
 	LOADI	-2
 	JUMP	Adjusted
 
-CorrectLeft:				; Set Target Angle to Adjustment Angle
+CorrectLeft:		
 	LOADI	2
 	JUMP	Adjusted
 
@@ -199,9 +209,12 @@ GoodValue:
 	RETURN
 
 	
-;Routine for turning at a corner. It accounts for the leg we are on
+;Routine for executing a turn. It accounts for the leg we are on i.e. what kind of turn we need to execute
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-TurnAtCorner:
+Turn:
+	LOAD	FSlow			; Turn at slow speed for higher accuracy 
+	STORE	DVel
+	
 	LOAD	Leg
 	SUB		BlueF
 	JZERO	LegBF
@@ -214,89 +227,58 @@ TurnAtCorner:
 	JUMP	LegBB			; Decide which leg we are currently on
 
 LegBF:
-	LOAD	FSlow
-	STORE	DVel
-	LOADI	90
-	STORE	DTheta
-	CALL	Wait1
-	CALL	Wait1			; Turn and wait for 2 sec. Hope it turned
-	
 	LOADI	250
 	STORE 	Thresh			; Update Threshold
 
 	LOAD	WhiteF
 	STORE 	Leg				; Update current leg
 	
-	LOAD	Zero
-	STORE	DTheta
-	;CALL	Align			; Align the robot parallel to the wall
-	OUT    	RESETPOS		; Reset odometry
-	JUMP	Loop
-
+	LOADI	90
+	STORE	DTheta			; Turn
+	JUMP	Turned
 LegWF:
-	LOAD	FSlow
-	STORE	DVel
-	LOADI	180
-	STORE	DTheta
-	CALL	Wait1
-	CALL	Wait1			; Turn and wait for 2 sec. Hope it turned
-
 	LOADI	250
 	STORE 	Thresh			; Update Threshold
 	
 	LOAD	WhiteB
 	STORE 	Leg				; Update current leg
 	
-	LOAD	Zero
-	STORE	DTheta
-	;CALL	Align			; Align the robot parallel to the wall
-	OUT    	RESETPOS		; Reset odometry
-	JUMP	Loop
-
+	LOADI	180
+	STORE	DTheta			; Turn
+	JUMP	Turned
 LegWB:
-	LOAD	FSlow
-	STORE	DVel
-	LOADI	-90
-	STORE	DTheta
-	CALL	Wait1
-	CALL	Wait1			; Turn and wait for 2 sec. Hope it turned
-
 	LOADI	650
 	STORE 	Thresh			; Update Threshold
-
+	
 	LOAD	BlueB
 	STORE 	Leg				; Update current leg
 	
-	LOAD	Zero
-	STORE	DTheta
-	;CALL	Align			; Align the robot parallel to the wall
-	OUT    	RESETPOS		; Reset odometry
-	JUMP	Loop
-
+	LOADI	-90
+	STORE	DTheta			; Turn
+	JUMP	Turned
 LegBB:
-	LOAD	FSlow
-	STORE	DVel
-	LOADI	180
-	STORE	DTheta
-	CALL	Wait1
-	CALL	Wait1			; Turn and wait for 2 sec. Hope it turned
-	
 	LOADI	650
 	STORE 	Thresh			; Update Threshold
-
+	
 	LOAD	BlueF
 	STORE 	Leg				; Update current leg
 	
+	LOADI	180
+	STORE	DTheta			; Turn
+	JUMP	Turned
+Turned:
+	CALL	Wait1
+	CALL	Wait1			; Wait for 2 sec. Hope it turned
+	
 	LOAD	Zero
-	STORE	DTheta
+	STORE	DTheta			; Head straight
 	;CALL	Align			; Align the robot parallel to the wall
 	OUT    	RESETPOS		; Reset odometry
-	JUMP	Loop
+	RETURN
 
-
-;Not connected to main code yet. Needs to be tested and bettered
 
 ;Routine for aligning the robot parallel with the wall
+;It samples the dinstance from the wall while turning the robot. It stops when the sample values start increasing. 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 Align:						; Loop until distance from sonar increases, means we passed parallel
 	CALL	ReadSonar
@@ -306,16 +288,7 @@ Align:						; Loop until distance from sonar increases, means we passed parallel
 	OUT		SSEG2
 	SUB		PrevDist
 	ADDI	-3				; Threshold value 
-	JNEG	Align
-	
-	LOAD	Zero
-	STORE	DVel
-	OUT    	RESETPOS		; Reset odometry
-	CALL	Wait1
-	CALL 	Wait1
-	CALL 	Wait1
-	CALL 	Wait1
-	
+	JNEG	Align			; Continue aligning if we didn't didn't get a larger (+3) value
 	RETURN
 
 ; Align subroutine to rotate for 10ms 
@@ -979,14 +952,13 @@ I2CError:
 ;* Variables
 ;***************************************************************
 Temp:     DW 0 ; "Temp" is not a great name, but can be useful
-RThresh:  DW 0
-LThresh:  DW 0
-Thresh:	  DW 0
-TurnAng:  DW 0
+CThresh:  DW 0 ; Close threshold, how close we can get to the wall
+FThresh:  DW 0 ; Far threshold, how far we can get from the wall	
+Thresh:	  DW 0 ; Single threshold for staying in a line
+AdjAng:   DW 0 ; Angle by which to adjust if we get too close or too far from the wall
 Leg:	  DW 0 ; Represents current state
-PrevDist: DW 0 ; "prevDist"
-TestSonarValue:	DW 0
-SonarVal:	  DW 0
+PrevDist: DW 0 ; Used for alignment with the wall
+SonarVal: DW 0 ; We store the sonar value here after it has been captured
 
 
 ;***************************************************************
