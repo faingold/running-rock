@@ -90,7 +90,7 @@ Main:
 	LOAD	BlueF
 	STORE	Leg				; Set leg to blue forward
 
-	LOADI	650
+	LOADI	680
 	STORE	Thresh			; Set wall distance threshold
 
 	CALL	Wait1			; Wait for everything to initialize		
@@ -100,33 +100,24 @@ Main:
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ActionLoop:
+	CALL	Align
+	CALL	Die
 	LOAD	Temp			; Load target angle
 	STORE 	DTheta			; Update target direction
 	LOAD   	FFast			; Load fast forward speed value
 	STORE  	DVel         	; Use API to move forward
 
-	LOAD	Leg			
+	LOAD	Leg
 	OUT		LCD				; Display current leg for debug
-	SUB		ShortF			
-	JZERO	OdometrySense
-	ADD 	ShortF
-	SUB		ShortB
-	JZERO	OdometrySense
-	JUMP	SonarSense		; Use odometry if on short leg, use sonars otherwhise
 
-OdometrySense:				; Check how far we've traveled. When far enought, turn
-	IN		XPOS
-	ADDI	-350	
-	JPOS	Wall
-	JUMP	Loop
-SonarSense:
 	IN		SONALARM		; Read sonar alarm data
 	AND		Mask23			; Mask to only get values of 2 forward sensors
 	JPOS	Wall			; Execute turn routine if wall ahead
 	JUMP	NoWall			; Don't do anything if there is no wall
 Wall:
 	CALL	Turn
-NoWall:						; Perform wall following
+NoWall:
+
 	CALL	ReadSonar
 	CALL	AdjustHeading
 
@@ -150,29 +141,27 @@ AdjustHeading:
 
 Forward:					; We are on forward leg
 	LOAD	SonarVal
-	ADDI	-270				; Use constant. Distance to the wall doesn't change. 
-	;SUB		Thresh
+	SUB		Thresh
 	ADDI	-20				; Offset to create a corridor
 	JPOS	CorrectRight	; Wall is too far
 	ADDI	40				; Offset to create a corridor
 	JNEG	CorrectLeft		; Wall is too close
-	JZERO	CorrectStraight ; Wall is just right
+	JUMP	CorrectStraight ; Wall is just right
 	
 Back:						; We are on back leg
 	LOAD	SonarVal
-	ADDI	-270
-	;SUB		Thresh
+	SUB		Thresh
 	ADDI	-20				; Offset to create a corridor
 	JPOS	CorrectLeft		; Wall is too far
 	ADDI	40				; Offset to create a corridor
 	JNEG	CorrectRight	; Wall is too close
-	JZERO	CorrectStraight ; Wall is just right
+	JUMP	CorrectStraight ; Wall is just right
 	
 CorrectRight:				; Set Target Angle to Adjustment Angle
 	LOAD	TEMP
 	JPOS	BeginRight		; If first time turning right, do regular adjustment. If not, do aggressive adjustment
 	IN		TIMER
-	ADDI	-20				; Check if time limit has elapsed
+	ADDI	-18				; Check if time limit has elapsed
 	JPOS	AggresiveRight
 	JUMP	RegularRight
 BeginRight:
@@ -181,14 +170,14 @@ RegularRight:
 	LOADI	-3
 	JUMP	Adjusted
 AggresiveRight:
-	LOADI	-15
+	LOADI	-12
 	JUMP	Adjusted
 
 CorrectLeft:		
 	LOAD	TEMP
 	JNEG	BeginLeft		; If first time turning left, do regular adjustment. If not, do aggressive adjustment
 	IN		TIMER
-	ADDI	-20				; Check if time limit has elapsed
+	ADDI	-18				; Check if time limit has elapsed
 	JPOS	AggresiveLeft
 	JUMP	RegularLeft
 BeginLeft:
@@ -197,7 +186,7 @@ RegularLeft:
 	LOADI	3
 	JUMP	Adjusted
 AggresiveLeft:
-	LOADI	15
+	LOADI	12
 	JUMP	Adjusted
 
 CorrectStraight:
@@ -230,9 +219,10 @@ ReadR:
 	RETURN
 
 
-;Routine for filtering bad sonar values. Input, current sonar reading, must be in AC
+;Routine for filtering bad sonar values.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 Filter:
+	LOAD 	SonarVal
 	ADDI	-800
 	JNEG	GoodValue
 	LOAD	FSlow
@@ -255,12 +245,6 @@ Turn:
 	STORE	DVel
 	
 	LOAD	Leg
-	SUB		ShortF
-	JZERO	LegSF
-	ADD 	ShortF
-	SUB		ShortB
-	JZERO	LegSB
-	ADD 	ShortB
 	SUB		BlueF
 	JZERO	LegBF
 	ADD 	BlueF
@@ -275,10 +259,10 @@ LegBF:
 	LOADI	250
 	STORE 	Thresh			; Update Threshold
 
-	LOAD	ShortF
+	LOAD	WhiteF
 	STORE 	Leg				; Update current leg
 	
-	LOADI	55
+	LOADI	90
 	STORE	DTheta			; Turn
 	JUMP	Turned
 LegWF:
@@ -292,43 +276,23 @@ LegWF:
 	STORE	DTheta			; Turn
 	JUMP	Turned
 LegWB:
-	LOADI	650
+	LOADI	680
 	STORE 	Thresh			; Update Threshold
 	
-	LOAD	ShortB
+	LOAD	BlueB
 	STORE 	Leg				; Update current leg
 	
-	LOADI	-55
+	LOADI	-90
 	STORE	DTheta			; Turn
 	JUMP	Turned
 LegBB:
-	LOADI	650
+	LOADI	680
 	STORE 	Thresh			; Update Threshold
 	
 	LOAD	BlueF
 	STORE 	Leg				; Update current leg
 	
 	LOADI	180
-	STORE	DTheta			; Turn
-	JUMP	Turned
-LegSF:
-	LOADI	650
-	STORE 	Thresh			; Update Threshold
-	
-	LOAD	WhiteF
-	STORE 	Leg				; Update current leg
-	
-	LOADI	35
-	STORE	DTheta			; Turn
-	JUMP	Turned
-LegSB:
-	LOADI	650
-	STORE 	Thresh			; Update Threshold
-	
-	LOAD	BlueB
-	STORE 	Leg				; Update current leg
-	
-	LOADI	-35
 	STORE	DTheta			; Turn
 	JUMP	Turned
 Turned:
@@ -1026,7 +990,6 @@ PrevDist: DW 0 ; Used for alignment with the wall
 SonarVal: DW 0 ; We store the sonar value here after it has been captured
 
 
-
 ;***************************************************************
 ;* Constants
 ;* (though there is nothing stopping you from writing to these)
@@ -1048,8 +1011,6 @@ BlueF:    DW 1
 BlueB:    DW 2
 WhiteF:   DW 3
 WhiteB:   DW 4
-ShortF:   DW 5
-ShortB:   DW 6
 
 
 ; Some bit masks.

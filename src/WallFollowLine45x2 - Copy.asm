@@ -169,35 +169,11 @@ Back:						; We are on back leg
 	JZERO	CorrectStraight ; Wall is just right
 	
 CorrectRight:				; Set Target Angle to Adjustment Angle
-	LOAD	TEMP
-	JPOS	BeginRight		; If first time turning right, do regular adjustment. If not, do aggressive adjustment
-	IN		TIMER
-	ADDI	-20				; Check if time limit has elapsed
-	JPOS	AggresiveRight
-	JUMP	RegularRight
-BeginRight:
-	OUT		TIMER
-RegularRight:
-	LOADI	-3
-	JUMP	Adjusted
-AggresiveRight:
-	LOADI	-15
+	LOADI	-5
 	JUMP	Adjusted
 
 CorrectLeft:		
-	LOAD	TEMP
-	JNEG	BeginLeft		; If first time turning left, do regular adjustment. If not, do aggressive adjustment
-	IN		TIMER
-	ADDI	-20				; Check if time limit has elapsed
-	JPOS	AggresiveLeft
-	JUMP	RegularLeft
-BeginLeft:
-	OUT		TIMER
-RegularLeft:
-	LOADI	3
-	JUMP	Adjusted
-AggresiveLeft:
-	LOADI	15
+	LOADI	5
 	JUMP	Adjusted
 
 CorrectStraight:
@@ -278,7 +254,7 @@ LegBF:
 	LOAD	ShortF
 	STORE 	Leg				; Update current leg
 	
-	LOADI	55
+	LOADI	45
 	STORE	DTheta			; Turn
 	JUMP	Turned
 LegWF:
@@ -298,7 +274,7 @@ LegWB:
 	LOAD	ShortB
 	STORE 	Leg				; Update current leg
 	
-	LOADI	-55
+	LOADI	-45
 	STORE	DTheta			; Turn
 	JUMP	Turned
 LegBB:
@@ -318,7 +294,7 @@ LegSF:
 	LOAD	WhiteF
 	STORE 	Leg				; Update current leg
 	
-	LOADI	35
+	LOADI	45
 	STORE	DTheta			; Turn
 	JUMP	Turned
 LegSB:
@@ -328,7 +304,7 @@ LegSB:
 	LOAD	BlueB
 	STORE 	Leg				; Update current leg
 	
-	LOADI	-35
+	LOADI	-45
 	STORE	DTheta			; Turn
 	JUMP	Turned
 Turned:
@@ -1024,7 +1000,6 @@ AdjAng:   DW 0 ; Angle by which to adjust if we get too close or too far from th
 Leg:	  DW 0 ; Represents current state
 PrevDist: DW 0 ; Used for alignment with the wall
 SonarVal: DW 0 ; We store the sonar value here after it has been captured
-
 
 
 ;***************************************************************
