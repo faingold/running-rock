@@ -152,37 +152,39 @@ AdjustHeading:
 	ADD 	BlueF
 	SUB		WhiteF
 	JZERO	Forward
-	JUMP	Back	
+	JUMP	Back
 
 Forward:					; We are on forward leg
 	LOAD	SonarVal
 	SUB		Thresh
-	ADDI	-20				; Offset to create a corridor
+	ADDI	-30				; Offset to create a corridor
 	JPOS	CorrectRight	; Wall is too far
-	ADDI	40				; Offset to create a corridor
+	ADDI	60				; Offset to create a corridor
 	JNEG	CorrectLeft		; Wall is too close
 	JUMP	CorrectStraight ; Wall is just right
-	
+
 Back:						; We are on back leg
 	LOAD	SonarVal
 	SUB		Thresh
-	ADDI	-20				; Offset to create a corridor
+	ADDI	-30				; Offset to create a corridor
 	JPOS	CorrectLeft		; Wall is too far
-	ADDI	40				; Offset to create a corridor
+	ADDI	60				; Offset to create a corridor
 	JNEG	CorrectRight	; Wall is too close
 	JUMP	CorrectStraight ; Wall is just right
-	
+
 CorrectRight:				; Set Target Angle to Adjustment Angle
 	LOAD	SonarVal
-	SUB		Thresh	
-	SHIFT	-3				; Divide difference by 8
-	CALL	Abs				
+	SUB		Thresh
+	SHIFT	-3
+	CALL	Abs
 	ADDI	-15				; Check if correcting too much
 	JPOS	OverLimitR
 	JUMP	UnderLimitR
 OverLimitR:
-	LOADI	15
+	LOADI	-15
+	JUMP	Adjusted
 UnderLimitR:	
+	ADDI	15
 	CALL	Neg				; Make sure we get a negative value
 	JUMP	Adjusted
 ; 	LOAD	TEMP
@@ -202,15 +204,17 @@ UnderLimitR:
 
 CorrectLeft:
 	LOAD	SonarVal
-	SUB		Thresh	
-	SHIFT	-3				; Divide difference by 8
-	CALL	Abs				
+	SUB		Thresh
+	SHIFT	-3
+	CALL	Abs				; Ensure positive value
 	ADDI	-15				; Check if correcting too much
 	JPOS	OverLimitL
 	JUMP	UnderLimitL
 OverLimitL:
 	LOADI	15
-UnderLimitL:	
+	JUMP 	Adjusted
+UnderLimitL:
+	ADDI	15
 	JUMP	Adjusted
 ; 	LOAD	TEMP
 ; 	JNEG	BeginLeft		; If first time turning left, do regular adjustment. If not, do aggressive adjustment
@@ -230,12 +234,11 @@ UnderLimitL:
 CorrectStraight:
 	LOAD	Zero
 	JUMP	Adjusted
-	
+
 Adjusted:
 	OUT 	SSEG1
 	STORE	TEMP
 	RETURN
-	
 	
 ;Routine for obtaining a reading from the appropriate sonar depending on current leg.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
