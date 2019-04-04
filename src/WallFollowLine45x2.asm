@@ -90,15 +90,15 @@ Main:
 	LOAD	BlueF
 	STORE	Leg				; Set leg to blue forward
 
-	LOADI	650
+	LOADI	270
 	STORE	Thresh			; Set wall distance threshold
 
 	CALL	Wait1			; Wait for everything to initialize		
 
 	
 ;This loop keeps repeating as the robot runs
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;***************************************************************
+;***************************************************************
 ActionLoop:
 	LOAD	Temp			; Load target angle
 	STORE 	DTheta			; Update target direction
@@ -115,11 +115,17 @@ ActionLoop:
 	JUMP	SonarSense		; Use odometry if on short leg, use sonars otherwhise
 
 OdometrySense:				; Check how far we've traveled. When far enought, turn
+	LOAD	Zero
+	STORE	Temp
+	LOADI	2
+	OUT		SSEG2
 	IN		XPOS
 	ADDI	-350	
 	JPOS	Wall
 	JUMP	Loop
 SonarSense:
+	LOADI	1
+	OUT		SSEG2
 	IN		SONALARM		; Read sonar alarm data
 	AND		Mask23			; Mask to only get values of 2 forward sensors
 	JPOS	Wall			; Execute turn routine if wall ahead
@@ -132,8 +138,8 @@ NoWall:						; Perform wall following
 
 Loop:
 	JUMP 	ActionLoop
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;***************************************************************
+;***************************************************************
  
 
 ;Routine for adjusting target direction angle based on latest sonar reading and current leg.
@@ -150,55 +156,76 @@ AdjustHeading:
 
 Forward:					; We are on forward leg
 	LOAD	SonarVal
-	ADDI	-270				; Use constant. Distance to the wall doesn't change. 
-	;SUB		Thresh
+	SUB		Thresh
 	ADDI	-20				; Offset to create a corridor
 	JPOS	CorrectRight	; Wall is too far
 	ADDI	40				; Offset to create a corridor
 	JNEG	CorrectLeft		; Wall is too close
-	JZERO	CorrectStraight ; Wall is just right
+	JUMP	CorrectStraight ; Wall is just right
 	
 Back:						; We are on back leg
 	LOAD	SonarVal
-	ADDI	-270
-	;SUB		Thresh
+	SUB		Thresh
 	ADDI	-20				; Offset to create a corridor
 	JPOS	CorrectLeft		; Wall is too far
 	ADDI	40				; Offset to create a corridor
 	JNEG	CorrectRight	; Wall is too close
-	JZERO	CorrectStraight ; Wall is just right
+	JUMP	CorrectStraight ; Wall is just right
 	
 CorrectRight:				; Set Target Angle to Adjustment Angle
-	LOAD	TEMP
-	JPOS	BeginRight		; If first time turning right, do regular adjustment. If not, do aggressive adjustment
-	IN		TIMER
-	ADDI	-20				; Check if time limit has elapsed
-	JPOS	AggresiveRight
-	JUMP	RegularRight
-BeginRight:
-	OUT		TIMER
-RegularRight:
-	LOADI	-3
-	JUMP	Adjusted
-AggresiveRight:
-	LOADI	-15
-	JUMP	Adjusted
-
-CorrectLeft:		
-	LOAD	TEMP
-	JNEG	BeginLeft		; If first time turning left, do regular adjustment. If not, do aggressive adjustment
-	IN		TIMER
-	ADDI	-20				; Check if time limit has elapsed
-	JPOS	AggresiveLeft
-	JUMP	RegularLeft
-BeginLeft:
-	OUT		TIMER
-RegularLeft:
-	LOADI	3
-	JUMP	Adjusted
-AggresiveLeft:
+	LOAD	SonarVal
+	SUB		Thresh	
+	SHIFT	-3				; Divide difference by 8
+	CALL	Abs				
+	ADDI	-15				; Check if correcting too much
+	JPOS	OverLimitR
+	JUMP	UnderLimitR
+OverLimitR:
 	LOADI	15
+UnderLimitR:	
+	CALL	Neg				; Make sure we get a negative value
 	JUMP	Adjusted
+; 	LOAD	TEMP
+; 	JPOS	BeginRight		; If first time turning right, do regular adjustment. If not, do aggressive adjustment
+; 	IN		TIMER
+; 	ADDI	-15				; Check if time limit has elapsed
+; 	JPOS	AggresiveRight
+; 	JUMP	RegularRight
+; BeginRight:
+; 	OUT		TIMER
+; RegularRight:
+; 	LOADI	-3
+; 	JUMP	Adjusted
+; AggresiveRight:
+; 	LOADI	-15
+; 	JUMP	Adjusted
+
+CorrectLeft:
+	LOAD	SonarVal
+	SUB		Thresh	
+	SHIFT	-3				; Divide difference by 8
+	CALL	Abs				
+	ADDI	-15				; Check if correcting too much
+	JPOS	OverLimitL
+	JUMP	UnderLimitL
+OverLimitL:
+	LOADI	15
+UnderLimitL:	
+	JUMP	Adjusted
+; 	LOAD	TEMP
+; 	JNEG	BeginLeft		; If first time turning left, do regular adjustment. If not, do aggressive adjustment
+; 	IN		TIMER
+; 	ADDI	-15 			; Check if time limit has elapsed
+; 	JPOS	AggresiveLeft
+; 	JUMP	RegularLeft
+; BeginLeft:
+; 	OUT		TIMER
+; RegularLeft:
+; 	LOADI	3
+; 	JUMP	Adjusted
+; AggresiveLeft:
+; 	LOADI	15
+; 	JUMP	Adjusted
 
 CorrectStraight:
 	LOAD	Zero
@@ -272,18 +299,14 @@ Turn:
 	JUMP	LegBB			; Decide which leg we are currently on
 
 LegBF:
-	LOADI	250
-	STORE 	Thresh			; Update Threshold
 
 	LOAD	ShortF
 	STORE 	Leg				; Update current leg
 	
-	LOADI	55
+	LOADI	60
 	STORE	DTheta			; Turn
 	JUMP	Turned
 LegWF:
-	LOADI	250
-	STORE 	Thresh			; Update Threshold
 	
 	LOAD	WhiteB
 	STORE 	Leg				; Update current leg
@@ -292,18 +315,14 @@ LegWF:
 	STORE	DTheta			; Turn
 	JUMP	Turned
 LegWB:
-	LOADI	650
-	STORE 	Thresh			; Update Threshold
 	
 	LOAD	ShortB
 	STORE 	Leg				; Update current leg
 	
-	LOADI	-55
+	LOADI	-60
 	STORE	DTheta			; Turn
 	JUMP	Turned
 LegBB:
-	LOADI	650
-	STORE 	Thresh			; Update Threshold
 	
 	LOAD	BlueF
 	STORE 	Leg				; Update current leg
@@ -312,23 +331,19 @@ LegBB:
 	STORE	DTheta			; Turn
 	JUMP	Turned
 LegSF:
-	LOADI	650
-	STORE 	Thresh			; Update Threshold
 	
 	LOAD	WhiteF
 	STORE 	Leg				; Update current leg
 	
-	LOADI	35
+	LOADI	30
 	STORE	DTheta			; Turn
 	JUMP	Turned
 LegSB:
-	LOADI	650
-	STORE 	Thresh			; Update Threshold
 	
 	LOAD	BlueB
 	STORE 	Leg				; Update current leg
 	
-	LOADI	-35
+	LOADI	-30
 	STORE	DTheta			; Turn
 	JUMP	Turned
 Turned:
@@ -336,7 +351,7 @@ Turned:
 	CALL	Wait1			; Wait for 2 sec. Hope it turned
 	
 	LOAD	Zero
-	STORE	DTheta			; Head straight
+	STORE	Temp			; Head straight
 	;CALL	Align			; Align the robot parallel to the wall
 	OUT    	RESETPOS		; Reset odometry
 	RETURN
@@ -1024,7 +1039,6 @@ AdjAng:   DW 0 ; Angle by which to adjust if we get too close or too far from th
 Leg:	  DW 0 ; Represents current state
 PrevDist: DW 0 ; Used for alignment with the wall
 SonarVal: DW 0 ; We store the sonar value here after it has been captured
-
 
 
 ;***************************************************************

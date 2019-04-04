@@ -81,7 +81,7 @@ Main:
 	LOADI 	&b00000000
 	OUT 	SONARINT		; Disable Interrupts
 
-	LOADI	600
+	LOADI	650
 	OUT		SONALARM		; Set threshold distance of forward sensors for wall turn 
 
 	LOAD	Zero
@@ -90,7 +90,7 @@ Main:
 	LOAD	BlueF
 	STORE	Leg				; Set leg to blue forward
 
-	LOADI	650
+	LOADI	680
 	STORE	Thresh			; Set wall distance threshold
 
 	CALL	Wait1			; Wait for everything to initialize		
@@ -144,7 +144,7 @@ Forward:					; We are on forward leg
 	JPOS	CorrectRight	; Wall is too far
 	ADDI	40				; Offset to create a corridor
 	JNEG	CorrectLeft		; Wall is too close
-	JZERO	CorrectStraight ; Wall is just right
+	JUMP	CorrectStraight ; Wall is just right
 	
 Back:						; We are on back leg
 	LOAD	SonarVal
@@ -153,15 +153,50 @@ Back:						; We are on back leg
 	JPOS	CorrectLeft		; Wall is too far
 	ADDI	40				; Offset to create a corridor
 	JNEG	CorrectRight	; Wall is too close
-	JZERO	CorrectStraight ; Wall is just right
+	JUMP	CorrectStraight ; Wall is just right
 	
 CorrectRight:				; Set Target Angle to Adjustment Angle
-	LOADI	-5
+	LOAD	SonarVal
+	SUB		Thresh	
+	SHIFT	-3				; Divide difference by 8
+	CALL	Abs				
+	CALL	Neg				; Make sure we get a negative value
 	JUMP	Adjusted
+; 	LOAD	TEMP
+; 	JPOS	BeginRight		; If first time turning right, do regular adjustment. If not, do aggressive adjustment
+; 	IN		TIMER
+; 	ADDI	-15				; Check if time limit has elapsed
+; 	JPOS	AggresiveRight
+; 	JUMP	RegularRight
+; BeginRight:
+; 	OUT		TIMER
+; RegularRight:
+; 	LOADI	-3
+; 	JUMP	Adjusted
+; AggresiveRight:
+; 	LOADI	-15
+; 	JUMP	Adjusted
 
-CorrectLeft:		
-	LOADI	5
+CorrectLeft:
+	LOAD	SonarVal
+	SUB		Thresh	
+	SHIFT	-3				; Divide difference by 8
+	CALL	Abs				; Ensure positive value
 	JUMP	Adjusted
+; 	LOAD	TEMP
+; 	JNEG	BeginLeft		; If first time turning left, do regular adjustment. If not, do aggressive adjustment
+; 	IN		TIMER
+; 	ADDI	-15 			; Check if time limit has elapsed
+; 	JPOS	AggresiveLeft
+; 	JUMP	RegularLeft
+; BeginLeft:
+; 	OUT		TIMER
+; RegularLeft:
+; 	LOADI	3
+; 	JUMP	Adjusted
+; AggresiveLeft:
+; 	LOADI	15
+; 	JUMP	Adjusted
 
 CorrectStraight:
 	LOAD	Zero
@@ -193,9 +228,10 @@ ReadR:
 	RETURN
 
 
-;Routine for filtering bad sonar values. Input, current sonar reading, must be in AC
+;Routine for filtering bad sonar values.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 Filter:
+	LOAD 	SonarVal
 	ADDI	-800
 	JNEG	GoodValue
 	LOAD	FSlow
@@ -249,7 +285,7 @@ LegWF:
 	STORE	DTheta			; Turn
 	JUMP	Turned
 LegWB:
-	LOADI	650
+	LOADI	680
 	STORE 	Thresh			; Update Threshold
 	
 	LOAD	BlueB
@@ -257,9 +293,13 @@ LegWB:
 	
 	LOADI	-90
 	STORE	DTheta			; Turn
+	CALL	Wait1
+	CALL	Wait1
+	LOAD	FMid
+	STORE	DVel	
 	JUMP	Turned
 LegBB:
-	LOADI	650
+	LOADI	680
 	STORE 	Thresh			; Update Threshold
 	
 	LOAD	BlueF
@@ -307,73 +347,6 @@ RotateLoop:
 	RETURN
 
 
-
-
-
-
-; CorrectTheta:
-; 	IN		DIST5				;Read Sonar
-; 	;-----------
-; 	STORE	TestSonarValue	
-; 	CALL	SonarFilter	
-; 	;----------
-; 	LOAD	TestSonarValue
-; 	STORE	prevDist			;Initial Reading
-; 	CALL	TimedTurn
-; Test90Degree:
-; 	IN		DIST5				;; based on sensor 5 (right sensor)
-; 	;----------------
-; 	STORE	TestSonarValue
-; 	CALL	SonarFilter
-; 	;;;-----------
-; 	SUB		prevDist			;; Create memory for PreviousDistance
-; 	;ADDI	5					;implement threshold
-; 	OUT		SSEG2
-; 	JNEG 	DoneTest90degree 	;; Done test 90 degrees
-; 	;LOADI 	5					;; ADJUSTMENT ANGLE (adjustable value)
-; 	IN		DIST5				;; Loads previoussonar measurement
-; 	STORE	prevDist			;; Store
-; 	OUT		Timer
-; 	CALL	TimedTurn
-; 	IN		DIST5
-; 	;;;;;;;;;;;;
-; 	STORE	TestSonarValue
-; 	CALL	SonarFilter
-; 	;;;;;;;;;;;;;
-; 	OUT		SSEG1				;; TEST
-; 	JUMP	Test90Degree	
-; 	
-; 	
-; DoneTest90degree:
-; 	;; RETURN here to previous code Here
-; 	;; CONTINUE CODE HERE
-; 	LOAD	FSlow
-;  	;OUT		RVELCMD
-;  	;OUT		LVELCMD
-;  	OUT		SSEG1
-; 	JUMP 	DoneTest90Degree
-; 	
-; TimedTurn: 
-; 	LOAD	FSlow				;; +5 value means adjust toward right
-; 	OUT		RVELCMD
-; 	Load	RSlow
-; 	OUT		LVELCMD
-; 	IN 		TIMER				;read timer	
-; 	OUT    	SSEG1
-; 	ADDI 	-1				; check if 10 ms elapsed
-; 	JNEG	TimedTurn			
-; 	RETURN
-; 
-; SonarFilter:
-; 	LOAD	TestSonarValue 	;Load in Sonar Value
-; 	JNEG	BadSonarValue	;
-; 	ADDI	-800			;
-; 	JPOS	BadSonarvalue	;
-; 	RETURN
-; BadSonarValue:
-; 	CALL	TimedTurn
-; 	JUMP	CorrectTheta
-; 	
 
 
 
