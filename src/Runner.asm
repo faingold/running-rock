@@ -6,6 +6,7 @@
 
 ; This code uses the timer interrupt for the movement control code.
 ; The ISR jump table is located in mem 0-4.  See manual for details.
+; BOT #65
 ORG 0
 	JUMP   Init        ; Reset vector
 	RETI               ; Sonar interrupt (unused)
@@ -81,7 +82,7 @@ Main:
 	LOADI 	&b00000000
 	OUT 	SONARINT		; Disable Interrupts
 
-	LOADI	700
+	LOADI	600
 	OUT		SONALARM		; Set threshold distance of forward sensors for wall turn 
 
 	LOAD	Zero
@@ -100,11 +101,11 @@ Main:
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ActionLoop:
-	CALL	Align
-	CALL	Die
+	;CALL	Align
+	;CALL	Die
 	LOAD	Temp			; Load target angle
 	STORE 	DTheta			; Update target direction
-	LOAD   	FFast			; Load fast forward speed value
+	LOAD   	FMid			; Load fast forward speed value
 	STORE  	DVel         	; Use API to move forward
 
 	LOAD	Leg
@@ -116,6 +117,7 @@ ActionLoop:
 	JUMP	NoWall			; Don't do anything if there is no wall
 Wall:
 	CALL	Turn
+	CALL	Wiggle			; Call Wiggle after every turn to make sure sonars can read the wall.
 NoWall:
 
 	CALL	ReadSonar
@@ -161,23 +163,33 @@ CorrectRight:				; Set Target Angle to Adjustment Angle
 	LOAD	TEMP
 	JPOS	BeginRight		; If first time turning right, do regular adjustment. If not, do aggressive adjustment
 	IN		TIMER
-	ADDI	-18				; Check if time limit has elapsed
+	ADDI	-50				; Check if time limit has elapsed for Wiggle adjustment.
+	JPOS	WiggleMoving
+	IN		TIMER
+	ADDI	-15				; Check if time limit has elapsed for agressive right adjustment.
 	JPOS	AggresiveRight
 	JUMP	RegularRight
+	
+WiggleMoving:
+	CALL	Wiggle
+	JUMP	Adjusted
 BeginRight:
 	OUT		TIMER
 RegularRight:
 	LOADI	-3
 	JUMP	Adjusted
 AggresiveRight:
-	LOADI	-12
+	LOADI	-15
 	JUMP	Adjusted
 
 CorrectLeft:		
 	LOAD	TEMP
 	JNEG	BeginLeft		; If first time turning left, do regular adjustment. If not, do aggressive adjustment
 	IN		TIMER
-	ADDI	-18				; Check if time limit has elapsed
+	ADDI	-50				; Check if time limit has elapsed for Wiggle adjustment.
+	JPOS	WiggleMoving	; Need a way to only jump to Wiggle Moving if we are in 
+	IN		TIMER
+	ADDI	-15				; Check if time limit has elapsed
 	JPOS	AggresiveLeft
 	JUMP	RegularLeft
 BeginLeft:
@@ -186,7 +198,7 @@ RegularLeft:
 	LOADI	3
 	JUMP	Adjusted
 AggresiveLeft:
-	LOADI	12
+	LOADI	15
 	JUMP	Adjusted
 
 CorrectStraight:
@@ -305,7 +317,47 @@ Turned:
 	OUT    	RESETPOS		; Reset odometry
 	RETURN
 
-
+Wiggle:
+	LOAD	Leg
+	SUB		BlueF
+	JZERO	WigBF
+	ADD 	BlueF
+	SUB		WhiteF
+	JZERO	WigWF
+	ADD 	WhiteF
+	SUB		WhiteB
+	JZERO	WigWB
+	JUMP	WigBB			; Decide which leg we are currently on
+	
+WigWF:						; Wiggle after first left turn.
+	LOADI	15
+	STORE	DTHETA
+	JUMP	Wiggled			; Wiggle away from wall.
+	
+WigWB:
+	LOADI	-15
+	STORE	DTHETA
+	JUMP	Wiggled			; Wiggle away from wall.
+	
+WigBB:
+	LOADI	-15
+	STORE	DTHETA
+	JUMP	Wiggled			; Wiggle away from wall.
+	
+WigBF:
+	LOADI	15
+	STORE	DTHETA
+	JUMP	Wiggled			; Wiggle away from wall.
+	
+Wiggled:
+	CALL	WAIT1
+	CALL 	WAIT1
+	LOAD	ZERO
+	OUT 	BEEP
+	STORE	DTHETA			; Go Straight after wiggling. 
+	LOAD	ZERO
+	RETURN
+	
 ;Routine for aligning the robot parallel with the wall
 ;It samples the dinstance from the wall while turning the robot. It stops when the sample values start increasing. 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
