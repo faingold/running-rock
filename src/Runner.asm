@@ -3,6 +3,7 @@
 ; - The movement API.
 ; - Several useful subroutines (ATAN2, Neg, Abs, mult, div).
 ; - Some useful constants (masks, numbers, robot stuff, etc.)
+;	Tested on bot 66
 
 ; This code uses the timer interrupt for the movement control code.
 ; The ISR jump table is located in mem 0-4.  See manual for details.
@@ -316,6 +317,10 @@ LegWF:
 	
 	LOADI	180
 	STORE	DTheta			; Turn
+	
+	LOADI	800				; Stay further from the corner
+	OUT		SONALARM
+	
 	JUMP	Turned
 LegWB:
 	
@@ -332,6 +337,10 @@ LegBB:
 	
 	LOADI	180
 	STORE	DTheta			; Turn
+	
+	LOADI	800				; Stay further from the corner
+	OUT		SONALARM
+	
 	JUMP	Turned
 LegSF:
 	
@@ -340,6 +349,10 @@ LegSF:
 	
 	LOADI	30
 	STORE	DTheta			; Turn
+	
+	LOADI	615				; Get Closer to the Column and get in the checkered area
+	OUT		SONALARM
+	
 	JUMP	Turned
 LegSB:
 	
@@ -348,6 +361,10 @@ LegSB:
 	
 	LOADI	-40
 	STORE	DTheta			; Turn
+	
+	LOADI	700				; Get Closer to the Column and get in the checkered area
+	OUT		SONALARM
+	
 	JUMP	Turned
 Turned:
 	CALL	Wait1
