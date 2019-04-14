@@ -93,8 +93,12 @@ Main:
 
 	LOADI	270
 	STORE	Thresh			; Set wall distance threshold
+	
+	LOAD	ZERO			; Initialize previous distance to 0.
+	STORE	PREVDIST
 
 	CALL	Wait1			; Wait for everything to initialize		
+	OUT		TIMER			; Initially Turn on the timer and reset it.
 
 	
 ;This loop keeps repeating as the robot runs
@@ -103,8 +107,12 @@ Main:
 ActionLoop:
 	LOAD	Temp			; Load target angle
 	STORE 	DTheta			; Update target direction
-	LOAD   	FFast			; Load fast forward speed value
+	LOAD   	FMid			; Load fast forward speed value
 	STORE  	DVel         	; Use API to move forward
+	
+	CALL	CheckCollision
+	LOAD	FMid
+	STORE	DVel
 
 	LOAD	Leg			
 	OUT		LCD				; Display current leg for debug
@@ -376,6 +384,62 @@ Turned:
 	OUT    	RESETPOS		; Reset odometry
 	RETURN
 
+	
+CheckCollision:
+	IN		XPOS
+	OUT		SSEG2
+	IN		Timer
+	ADDI	-30
+	JPOS	DoCheck
+	RETURN					; Check x position changes every second
+DoCheck:
+	OUT		Timer			; Reset Timer every 3 Seconds regardless of hitting wall or not.
+	IN		RVEL
+	JZERO	Stuck
+	JUMP	NotStuck		; Check if our x position changed
+NotStuck:
+	LOAD	XPOS
+	STORE	PrevDist
+	RETURN
+Stuck:
+	LOADI  	&H140       ; short, high-pitched beep
+	OUT    	BEEP        ; stop beeping
+	OUT		RESETPOS
+	LOAD	Zero
+	STORE	DTheta
+	LOAD	RMID
+	STORE	DVel
+	CALL	Wait1			; Reverse for 1 sec
+	CALL	Wait1			; Reverse for 1 sec
+	LOAD	Zero
+	STORE	DVel			; Stop
+
+	LOAD	Leg				; Determine which sonar to read based on current leg
+	SUB		BlueF
+	JZERO	TurnL
+	ADD 	BlueF
+	SUB		WhiteF
+	JZERO	TurnL
+	JUMP	TurnR
+TurnR:						; Turn away from the wall
+	LOADI	-25
+	STORE	DTheta
+	JUMP	Recovered
+TurnL:
+	LOADI	25
+	STORE	DTheta
+	JUMP	Recovered
+Recovered:
+	LOAD	FSlow
+	STORE	DVel
+	CALL	Wait1			; Should rotate to face straight again
+	CALL	Wait1
+	LOAD	Zero
+	STORE	DTheta			; Set angle as straight again
+	STORE	Temp			; Head straight
+	OUT    	RESETPOS		; Reset odometry since bot should be heading straight again.
+	CALL	Wait1
+	RETURN
 
 ;Routine for aligning the robot parallel with the wall
 ;It samples the dinstance from the wall while turning the robot. It stops when the sample values start increasing. 
