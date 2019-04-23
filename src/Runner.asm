@@ -83,40 +83,51 @@ Main:
 	OUT 	SONARINT		; Disable Interrupts
 
 	LOADI	700
-	OUT		SONALARM		; Set threshold distance of forward sensors for wall turn 
+	OUT		SONALARM		; Set threshold distance of forward sensors for wall turn
 
 	LOAD	Zero
 	STORE	Temp			; Temp is the target angle. Set it to 0
 
+	IN		SWITCHES		;Determine Starting Leg
+	AND		Mask0
+	JPOS	LegJump
+	JUMP	Regular
+LegJump:
+	LOAD	WhiteB
+	JUMP	LegConfigured
+Regular:
 	LOAD	BlueF
-	STORE	Leg				; Set leg to blue forward
+	JUMP	LegConfigured
+LegConfigured:
+	STORE	Leg
 
 	LOADI	270
 	STORE	Thresh			; Set wall distance threshold
-	
+
 	LOAD	ZERO			; Initialize previous distance to 0.
 	STORE	PREVDIST
 
-	CALL	Wait1			; Wait for everything to initialize		
+	CALL	Wait1			; Wait for everything to initialize
 	OUT		TIMER			; Initially Turn on the timer and reset it.
 
-	
-;This loop keeps repeating as the robot runs
+
+
+;This loop continuously repeats as the robot runs
 ;***************************************************************
 ;***************************************************************
 ActionLoop:
 	LOAD	Temp			; Load target angle
 	STORE 	DTheta			; Update target direction
-	LOAD   	FMid			; Load fast forward speed value
+	LOAD   	FCust			; Load custom forward speed value
 	STORE  	DVel         	; Use API to move forward
-	
+
 	CALL	CheckCollision
 	LOAD	FMid
 	STORE	DVel
 
-	LOAD	Leg			
+	LOAD	Leg
 	OUT		LCD				; Display current leg for debug
-	SUB		ShortF			
+	SUB		ShortF
 	JZERO	OdometrySense
 	ADD 	ShortF
 	SUB		ShortB
@@ -129,7 +140,7 @@ OdometrySense:				; Check how far we've traveled. When far enought, turn
 	LOADI	2
 	OUT		SSEG2
 	IN		XPOS
-	ADDI	-350	
+	ADDI	-600
 	JPOS	Wall
 	JUMP	Loop
 SonarSense:
@@ -149,10 +160,9 @@ Loop:
 	JUMP 	ActionLoop
 ;***************************************************************
 ;***************************************************************
- 
+
 
 ;Routine for adjusting target direction angle based on latest sonar reading and current leg.
-;Input, current sonar reading, must be in AC
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 AdjustHeading:
 	LOAD	Leg				; Determine in which direction to adjust based on current leg
@@ -192,7 +202,7 @@ CorrectRight:				; Set Target Angle to Adjustment Angle
 OverLimitR:
 	LOADI	-15
 	JUMP	Adjusted
-UnderLimitR:	
+UnderLimitR:
 	ADDI	15
 	CALL	Neg				; Make sure we get a negative value
 	JUMP	Adjusted
@@ -248,7 +258,7 @@ Adjusted:
 	OUT 	SSEG1
 	STORE	TEMP
 	RETURN
-	
+
 ;Routine for obtaining a reading from the appropriate sonar depending on current leg.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ReadSonar:
@@ -280,19 +290,19 @@ Filter:
 	STORE	DTheta
 	CALL	Wait1
 	CALL	Wait1			; Turn and wait for 2 sec. Hope it turned
-	OUT     RESETPOS    	; reset the odometry to 0,0,0		
+	OUT     RESETPOS    	; reset the odometry to 0,0,0
 	RETURN
 GoodValue:
 	ADDI	800
 	RETURN
 
-	
+
 ;Routine for executing a turn. It accounts for the leg we are on i.e. what kind of turn we need to execute
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 Turn:
-	LOAD	FSlow			; Turn at slow speed for higher accuracy 
+	LOAD	FSlow			; Turn at slow speed for higher accuracy
 	STORE	DVel
-	
+
 	LOAD	Leg
 	SUB		ShortF
 	JZERO	LegSF
@@ -314,77 +324,80 @@ LegBF:
 
 	LOAD	ShortF
 	STORE 	Leg				; Update current leg
-	
+
 	LOADI	60
 	STORE	DTheta			; Turn
 	JUMP	Turned
 LegWF:
-	
+
 	LOAD	WhiteB
 	STORE 	Leg				; Update current leg
-	
+
 	LOADI	180
 	STORE	DTheta			; Turn
-	
+
 	LOADI	800				; Stay further from the corner
 	OUT		SONALARM
-	
+
 	JUMP	Turned
 LegWB:
-	
+
 	LOAD	ShortB
 	STORE 	Leg				; Update current leg
-	
+
 	LOADI	-60
 	STORE	DTheta			; Turn
 	JUMP	Turned
 LegBB:
-	
+
 	LOAD	BlueF
 	STORE 	Leg				; Update current leg
-	
+
 	LOADI	180
 	STORE	DTheta			; Turn
-	
+
 	LOADI	800				; Stay further from the corner
 	OUT		SONALARM
-	
+
 	JUMP	Turned
 LegSF:
-	
+
 	LOAD	WhiteF
 	STORE 	Leg				; Update current leg
-	
+
 	LOADI	30
 	STORE	DTheta			; Turn
-	
-	LOADI	615				; Get Closer to the Column and get in the checkered area
+
+	LOADI	550			; Get Closer to the Column and get in the checkered area
 	OUT		SONALARM
-	
+
 	JUMP	Turned
 LegSB:
-	
+
 	LOAD	BlueB
 	STORE 	Leg				; Update current leg
-	
+
 	LOADI	-40
 	STORE	DTheta			; Turn
-	
-	LOADI	700				; Get Closer to the Column and get in the checkered area
+
+	LOADI	650				; Get Closer to the Column and get in the checkered area
 	OUT		SONALARM
-	
+
 	JUMP	Turned
 Turned:
 	CALL	Wait1
 	CALL	Wait1			; Wait for 2 sec. Hope it turned
-	
+
 	LOAD	Zero
 	STORE	Temp			; Head straight
 	;CALL	Align			; Align the robot parallel to the wall
 	OUT    	RESETPOS		; Reset odometry
 	RETURN
 
-	
+
+;Routine for detecting collisions. If the robot is stuck, it will reverse and
+;turn to get back on track
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 CheckCollision:
 	IN		XPOS
 	OUT		SSEG2
@@ -403,6 +416,8 @@ NotStuck:
 	RETURN
 Stuck:
 	LOADI  	&H140       ; short, high-pitched beep
+	OUT    	BEEP        ; stop beeping
+	OUT    	BEEP        ; stop beeping
 	OUT    	BEEP        ; stop beeping
 	OUT		RESETPOS
 	LOAD	Zero
@@ -442,7 +457,7 @@ Recovered:
 	RETURN
 
 ;Routine for aligning the robot parallel with the wall
-;It samples the dinstance from the wall while turning the robot. It stops when the sample values start increasing. 
+;It samples the dinstance from the wall while turning the robot. It stops when the sample values start increasing.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 Align:						; Loop until distance from sonar increases, means we passed parallel
 	CALL	ReadSonar
@@ -451,91 +466,22 @@ Align:						; Loop until distance from sonar increases, means we passed parallel
 	CALL	ReadSonar
 	OUT		SSEG2
 	SUB		PrevDist
-	ADDI	-3				; Threshold value 
+	ADDI	-3				; Threshold value
 	JNEG	Align			; Continue aligning if we didn't didn't get a larger (+3) value
 	RETURN
 
-; Align subroutine to rotate for 10ms 
+; Align subroutine to rotate for 10ms
 RotateL10ms:
 	OUT 	Timer
 RotateLoop:
-	LOAD	FSlow			
+	LOAD	FSlow
 	OUT		RVELCMD
 	LOAD	RSlow
 	OUT		LVELCMD			; Write slow speed to motors
-	IN 		TIMER					
-	ADDI 	-1				
+	IN 		TIMER
+	ADDI 	-1
 	JNEG	RotateLoop		; Check if 10 ms elapsed
 	RETURN
-
-
-
-
-
-
-; CorrectTheta:
-; 	IN		DIST5				;Read Sonar
-; 	;-----------
-; 	STORE	TestSonarValue	
-; 	CALL	SonarFilter	
-; 	;----------
-; 	LOAD	TestSonarValue
-; 	STORE	prevDist			;Initial Reading
-; 	CALL	TimedTurn
-; Test90Degree:
-; 	IN		DIST5				;; based on sensor 5 (right sensor)
-; 	;----------------
-; 	STORE	TestSonarValue
-; 	CALL	SonarFilter
-; 	;;;-----------
-; 	SUB		prevDist			;; Create memory for PreviousDistance
-; 	;ADDI	5					;implement threshold
-; 	OUT		SSEG2
-; 	JNEG 	DoneTest90degree 	;; Done test 90 degrees
-; 	;LOADI 	5					;; ADJUSTMENT ANGLE (adjustable value)
-; 	IN		DIST5				;; Loads previoussonar measurement
-; 	STORE	prevDist			;; Store
-; 	OUT		Timer
-; 	CALL	TimedTurn
-; 	IN		DIST5
-; 	;;;;;;;;;;;;
-; 	STORE	TestSonarValue
-; 	CALL	SonarFilter
-; 	;;;;;;;;;;;;;
-; 	OUT		SSEG1				;; TEST
-; 	JUMP	Test90Degree	
-; 	
-; 	
-; DoneTest90degree:
-; 	;; RETURN here to previous code Here
-; 	;; CONTINUE CODE HERE
-; 	LOAD	FSlow
-;  	;OUT		RVELCMD
-;  	;OUT		LVELCMD
-;  	OUT		SSEG1
-; 	JUMP 	DoneTest90Degree
-; 	
-; TimedTurn: 
-; 	LOAD	FSlow				;; +5 value means adjust toward right
-; 	OUT		RVELCMD
-; 	Load	RSlow
-; 	OUT		LVELCMD
-; 	IN 		TIMER				;read timer	
-; 	OUT    	SSEG1
-; 	ADDI 	-1				; check if 10 ms elapsed
-; 	JNEG	TimedTurn			
-; 	RETURN
-; 
-; SonarFilter:
-; 	LOAD	TestSonarValue 	;Load in Sonar Value
-; 	JNEG	BadSonarValue	;
-; 	ADDI	-800			;
-; 	JPOS	BadSonarvalue	;
-; 	RETURN
-; BadSonarValue:
-; 	CALL	TimedTurn
-; 	JUMP	CorrectTheta
-; 	
 
 
 
@@ -1117,7 +1063,7 @@ I2CError:
 ;***************************************************************
 Temp:     DW 0 ; "Temp" is not a great name, but can be useful
 CThresh:  DW 0 ; Close threshold, how close we can get to the wall
-FThresh:  DW 0 ; Far threshold, how far we can get from the wall	
+FThresh:  DW 0 ; Far threshold, how far we can get from the wall
 Thresh:	  DW 0 ; Single threshold for staying in a line
 AdjAng:   DW 0 ; Angle by which to adjust if we get too close or too far from the wall
 Leg:	  DW 0 ; Represents current state
@@ -1179,6 +1125,8 @@ FSlow:    DW 100       ; 100 is about the lowest velocity value that will move
 RSlow:    DW -100
 FMid:     DW 350       ; 350 is a medium speed
 RMid:     DW -350
+FCust:	  DW 450	   ; MEDIUM fast speed
+RCust:	  DW -450
 FFast:    DW 500       ; 500 is almost max speed (511 is max)
 RFast:    DW -500
 
